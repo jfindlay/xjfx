@@ -1,0 +1,64 @@
+[project]
+name = "xjfx"
+version = "1.0.0"
+authors = [
+  { name="Justin Findlay", email="justin@findlay.space" },
+]
+description = "Collection of simple utility functions and classes that extend standard library functionality."
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "colorama",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/jfindlay/xjfx/"
+"Bug Tracker" = "https://github.com/jfindlay/xjfx/issues/"
+
+[build-system]
+requires = [
+    "build",
+    "setuptools",
+    "tox>=4.0",
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["xjfx"]
+
+[tool.pylint."MESSAGES CONTROL"]
+confidence = [
+    "HIGH",
+    "CONTROL_FLOW",
+    "INFERENCE",
+    "INFERENCE_FAILURE",
+    "UNDEFINED",
+]
+disable = [
+    # Standard disable list as of 2023-11-06
+    "raw-checker-failed",
+    "bad-inline-option",
+    "locally-disabled",
+    "file-ignored",
+    "suppressed-message",
+    "useless-suppression",
+    "deprecated-pragma",
+    "use-implicit-booleaness-not-comparison-to-string",
+    "use-implicit-booleaness-not-comparison-to-zero",
+    "use-symbolic-message-instead",
+    # Additional disabled checkers
+    "fixme",
+    "too-many-arguments",
+    "redefined-builtin",
+    "logging-fstring-interpolation",
+    "too-few-public-methods",
+    "broad-exception-caught",
+]
+[tool.pylint.FORMAT]
+max-line-length = 128
