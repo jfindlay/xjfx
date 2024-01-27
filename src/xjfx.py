@@ -3,7 +3,9 @@ Collection of simple utility functions and classes that extend standard library 
 """
 # TODO:
 # - Tests
-# - `exec_cmd()` multiproc support (including logging) for watching proc stdout and stderr in real time
+# - exec_cmd
+# 	- Multiproc support (including logging) for watching proc stdout and stderr in real time
+
 import collections
 import concurrent.futures
 import enum
@@ -16,6 +18,41 @@ import typing
 import colorama
 
 LOGGER = logging.getLogger(__name__)
+
+
+class ProcStream(enum.Enum):
+    """
+    Enumerate process "streams" used
+    - OUTPUT: Combined stdout/stderr
+    - STDOUT: Standard output
+    - STDERR: Standard error
+    """
+
+    OUTPUT = 0
+    STDOUT = 1
+    STDERR = 2
+
+
+def _fmt_proc_output(stream: ProcStream, line: str) -> list[str]:
+    """
+    Format cmd stdout and stderr logging output
+    """
+    if stream == ProcStream.OUTPUT:
+        fore_color: str = colorama.Fore.LIGHTBLACK_EX
+    if stream == ProcStream.STDOUT:
+        fore_color = colorama.Fore.BLUE
+    elif stream == ProcStream.STDERR:
+        fore_color = colorama.Fore.YELLOW
+    return [
+        # Sometimes the cmd output does not return to the line beginning, so force carriage return
+        "    %s[%s]%s %s%s%s\r",
+        fore_color + colorama.Style.BRIGHT,
+        stream.name,
+        colorama.Style.RESET_ALL,
+        fore_color,
+        line.strip(),
+        colorama.Style.RESET_ALL,
+    ]
 
 
 def exec_cmd(
@@ -36,39 +73,6 @@ def exec_cmd(
     - Format the results
     """
 
-    class Stream(enum.Enum):
-        """
-        Enumerate process "streams" used
-        - OUTPUT: Combined stdout/stderr
-        - STDOUT: Standard output
-        - STDERR: Standard error
-        """
-
-        OUTPUT = 0
-        STDOUT = 1
-        STDERR = 2
-
-    def fmt_log_output(stream: Stream, line: str) -> list[str]:
-        """
-        Format cmd stdout and stderr logging output
-        """
-        if stream == Stream.OUTPUT:
-            fore_color: str = colorama.Fore.LIGHTBLACK_EX
-        if stream == Stream.STDOUT:
-            fore_color = colorama.Fore.BLUE
-        elif stream == Stream.STDERR:
-            fore_color = colorama.Fore.YELLOW
-        return [
-            # TODO: Sometimes the cmd output does not return to the line beginning, so force carriage return
-            "    %s[%s]%s %s%s%s\r",
-            fore_color + colorama.Style.BRIGHT,
-            stream.name,
-            colorama.Style.RESET_ALL,
-            fore_color,
-            line.strip(),
-            colorama.Style.RESET_ALL,
-        ]
-
     LOGGER.debug(
         "%s[executing]%s `%s`",
         colorama.Fore.WHITE + colorama.Style.BRIGHT,
@@ -82,7 +86,7 @@ def exec_cmd(
     }
     with subprocess.Popen(
         args,
-        stdin=subprocess.PIPE if input is not None else None,
+        stdin=None if input is None else subprocess.PIPE,
         stdout=stdout,
         stderr=stderr,
         cwd=cwd,
@@ -92,24 +96,19 @@ def exec_cmd(
             cmd_desc.stdin.write(input)
             cmd_desc.stdin.flush()
         if stdout and isinstance(cmd_desc.stdout, collections.abc.Iterable):
-            # Subprocess can only watch one filehandle in realtime, so if watching stderr is desired, combine it with stdout.
             for raw_line in cmd_desc.stdout:
                 line: str = raw_line.decode()
                 LOGGER.debug(
-                    *fmt_log_output(
-                        Stream.OUTPUT if stderr == subprocess.STDOUT else Stream.STDOUT,
+                    *_fmt_proc_output(
+                        ProcStream.OUTPUT if stderr == subprocess.STDOUT else ProcStream.STDOUT,
                         line,
                     )
                 )
                 res["stdout"] += line if decode_output else raw_line
-        if (
-            stderr
-            and isinstance(cmd_desc.stderr, collections.abc.Iterable)
-            and stderr != subprocess.STDOUT
-        ):
+        if stderr and isinstance(cmd_desc.stderr, collections.abc.Iterable) and stderr != subprocess.STDOUT:
             for raw_line in cmd_desc.stderr:
                 line = raw_line.decode()
-                LOGGER.debug(*fmt_log_output(Stream.STDERR, line))
+                LOGGER.debug(*_fmt_proc_output(ProcStream.STDERR, line))
                 res["stderr"] += line if decode_output else raw_line
     res["retcode"] = cmd_desc.returncode
     if not ignore_retcode and res["retcode"] != 0:
@@ -136,6 +135,13 @@ def get_answer(prompt: str, accept: list[str], lower: bool = True) -> bool:
     if any(answer.lower() == a.lower() if lower else answer == a for a in accept):
         return True
     return False
+
+
+def get_yes(prompt: str):
+    """
+    Get a yes/no answer.
+    """
+    return get_answer(f"{prompt} [Y|n]", accept=["yes", "y", ""])
 
 
 def setup_logging(level: int = logging.INFO):
@@ -172,9 +178,7 @@ def setup_logging(level: int = logging.INFO):
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.colorname = (
-                f"{self.colors['name']}[{self.name:17}]{self.colors['reset']}"
-            )
+            self.colorname = f"{self.colors['name']}[{self.name:17}]{self.colors['reset']}"
             self.colorlevel = f"{self.colors['lvls'][self.levelname]}[{self.levelname:8}]{self.colors['reset']}"
             self.colormsg = f"{self.colors['msgs'][self.levelname]} {self.getMessage()}{self.colors['reset']}"
 
@@ -229,16 +233,12 @@ def grouper(
     raise ValueError("Expected fill, strict, ignore, or remainder")
 
 
-def thr_exec(
-    func: collections.abc.Callable, args: list[tuple], max_workers: int | None = None
-):
+def thr_exec(func: collections.abc.Callable, args: list[tuple], max_workers: int | None = None):
     """
     Special case reduction for executing a set of parallel tasks in a thread pool.
     """
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool_exec:
-        for future in concurrent.futures.as_completed(
-            {pool_exec.submit(*(func,) + al): al for al in args}
-        ):
+        for future in concurrent.futures.as_completed({pool_exec.submit(*(func,) + al): al for al in args}):
             try:
                 future.result()
             except Exception as ex:

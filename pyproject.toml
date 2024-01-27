@@ -1,6 +1,6 @@
 [project]
 name = "xjfx"
-version = "1.0.0"
+version = "1.1.0"
 authors = [
   { name="Justin Findlay", email="justin@findlay.space" },
 ]
@@ -30,35 +30,26 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-packages = ["xjfx"]
+py-modules = ["xjfx"]
+
 
 [tool.pylint."MESSAGES CONTROL"]
-confidence = [
-    "HIGH",
-    "CONTROL_FLOW",
-    "INFERENCE",
-    "INFERENCE_FAILURE",
-    "UNDEFINED",
-]
 disable = [
-    # Standard disable list as of 2023-11-06
-    "raw-checker-failed",
-    "bad-inline-option",
-    "locally-disabled",
-    "file-ignored",
-    "suppressed-message",
-    "useless-suppression",
-    "deprecated-pragma",
-    "use-implicit-booleaness-not-comparison-to-string",
-    "use-implicit-booleaness-not-comparison-to-zero",
-    "use-symbolic-message-instead",
-    # Additional disabled checkers
-    "fixme",
-    "too-many-arguments",
-    "redefined-builtin",
-    "logging-fstring-interpolation",
-    "too-few-public-methods",
     "broad-exception-caught",
+    "consider-using-sys-exit",
+    "fixme",
+    "inconsistent-return-statements",
+    "logging-fstring-interpolation",
+    "redefined-builtin",
+    "too-few-public-methods",
+    "too-many-arguments",
 ]
+
 [tool.pylint.FORMAT]
 max-line-length = 128
+
+[tool.mypy]
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
+
+[tool.ruff]
+line-length = 128
