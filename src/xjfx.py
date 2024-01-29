@@ -1,14 +1,19 @@
 """
 Collection of simple utility functions and classes that extend standard library functionality.
+
+For convenience, the `DEVNULL`, `STDOUT`, and `PIPE` constants are imported from `subprocess` so that users of `xjfx` do not
+need to `import subprocess`.
 """
 # TODO:
 # - Tests
 # - exec_cmd
 # 	- Multiproc support (including logging) for watching proc stdout and stderr in real time
 
+import asyncio
 import collections
 import concurrent.futures
 import enum
+import io
 import itertools
 import logging
 import shlex
@@ -17,12 +22,15 @@ import typing
 
 import colorama
 
+DEVNULL = subprocess.DEVNULL
+STDOUT = subprocess.STDOUT
+PIPE = subprocess.PIPE
 LOGGER = logging.getLogger(__name__)
 
 
-class ProcStream(enum.Enum):
+class ProcStreamClassifier(enum.Enum):
     """
-    Enumerate process "streams" used
+    Enumerate process "streams" used by the `exec_cmd*` functions.
     - OUTPUT: Combined stdout/stderr
     - STDOUT: Standard output
     - STDERR: Standard error
@@ -33,91 +41,209 @@ class ProcStream(enum.Enum):
     STDERR = 2
 
 
-def _fmt_proc_output(stream: ProcStream, line: str) -> list[str]:
+class ProcData:
     """
-    Format cmd stdout and stderr logging output
+    Data returned from a command.
     """
-    if stream == ProcStream.OUTPUT:
-        fore_color: str = colorama.Fore.LIGHTBLACK_EX
-    if stream == ProcStream.STDOUT:
+
+    def __init__(self, decode_output: bool = True):
+        """
+        Setup command return object.
+        """
+        self.decode_output = decode_output
+        self._stdout = b""
+        self._stderr = b""
+        self.retcode = 0
+
+    @property
+    def stdout(self) -> str | bytes:
+        """
+        Transparently decode if necessary.
+        """
+        return self._stdout.decode() if self.decode_output else self._stdout
+
+    @stdout.setter
+    def stdout(self, lines:list[bytes]) ->None:
+        """
+        Append to stdout.
+        """
+        self._stdout = lines
+
+    @property
+    def stderr(self) -> str | bytes:
+        """
+        Transparently decode if necessary.
+        """
+        return self._stderr.decode() if self.decode_output else self._stderr
+
+    @stderr.setter
+    def stderr(self, lines:list[bytes]) ->None:
+        """
+        Append to stderr.
+        """
+        self._stderr = lines
+
+
+def _fmt_proc_cmd(args: list[str]) -> list[str]:
+    """
+    Format command preamble.
+    """
+    return (
+        "%s[executing]%s `%s`",
+        colorama.Fore.WHITE + colorama.Style.BRIGHT,
+        colorama.Style.RESET_ALL,
+        shlex.join(args),
+    )
+
+
+def _fmt_proc_output(stream_class: ProcStreamClassifier, line: str) -> list[str]:
+    """
+    Format stdout/stderr logging output.
+    """
+    if stream_class == ProcStreamClassifier.OUTPUT:
+        fore_color = colorama.Fore.LIGHTBLACK_EX
+    if stream_class == ProcStreamClassifier.STDOUT:
         fore_color = colorama.Fore.BLUE
-    elif stream == ProcStream.STDERR:
+    elif stream_class == ProcStreamClassifier.STDERR:
         fore_color = colorama.Fore.YELLOW
-    return [
+    return (
         # Sometimes the cmd output does not return to the line beginning, so force carriage return
         "    %s[%s]%s %s%s%s\r",
         fore_color + colorama.Style.BRIGHT,
-        stream.name,
+        stream_class.name,
         colorama.Style.RESET_ALL,
         fore_color,
         line.strip(),
         colorama.Style.RESET_ALL,
-    ]
+    )
+
+
+def _iterate_proc_output(stream: io.BufferedReader, stream_class: ProcStreamClassifier) -> list[bytes]:
+    """
+    Iterate over the process's stdout/stderr.
+    """
+    accumulated_output = b''
+    for raw_line in stream:
+        LOGGER.debug(*_fmt_proc_output(stream_class, raw_line.decode()))
+        accumulated_output += raw_line
+    return accumulated_output
+
+
+async def _iterate_proc_output_async(stream: io.BufferedReader, stream_class: ProcStreamClassifier) -> list[bytes]:
+    """
+    Iterate over the process's stdout/stderr.
+    """
+    accumulated_output: b''
+    async for raw_line in stream:
+        LOGGER.debug(*_fmt_proc_output(stream_class, raw_line.decode()))
+        accumulated_output += raw_line
+    return accumulated_output
+
+
+def _display_proc_result(args:list[str], ignore_retcode:bool, proc_data:ProcData)->None:
+    '''
+    Show command data in the case of error.
+    '''
+    if not ignore_retcode and proc_data.retcode != 0:
+        LOGGER.error(f"`{shlex.join(args)}` returned: {proc_data.retcode!r}")
+        # If the log level is debug or lower, this info was already logged.
+        if LOGGER.getEffectiveLevel() > logging.DEBUG:
+            if proc_data.stdout:
+                LOGGER.error(proc_data.stdout)
+            if proc_data.stderr:
+                LOGGER.error(proc_data.stderr)
 
 
 def exec_cmd(
     args: list[str],
     input: bytes | None = None,
-    stdout: int | None = subprocess.PIPE,
-    stderr: int | None = subprocess.PIPE,
+    stdout: int | None = PIPE,
+    stderr: int | None = PIPE,
     cwd: str | None = None,
     ignore_retcode: bool = False,
     decode_output: bool = True,
     **kwargs,
-) -> dict[str, str | bytes | int]:
+) -> ProcData:
     """
     Run a command line and:
     - Provide input
     - Watch the output
     - Integrate logging
     - Format the results
-    """
 
-    LOGGER.debug(
-        "%s[executing]%s `%s`",
-        colorama.Fore.WHITE + colorama.Style.BRIGHT,
-        colorama.Style.RESET_ALL,
-        shlex.join(args),
-    )
-    res: dict[str, str | bytes | int] = {
-        "stdout": "" if decode_output else b"",
-        "stderr": "" if decode_output else b"",
-        "retcode": 0,
-    }
+    Except for `ignore_retcode`, and `decode_output`, the arguments are identical to `subprocess.Popen()` and are passed
+    directly to that constructor.
+
+    The `subprocess` module cannot natively watch both stdout and stderr in real time unless stderr is redirected to stdout.
+    Thus, this function can watch stdout or stderr but not both unless they are combined.  Combining stdout and stderr streams
+    by setting `stderr=subprocess.STDOUT` means they will be indistinguishably returned in `proc_data.stdout`.
+    """
+    LOGGER.debug(*_fmt_proc_cmd(args))
+    proc_data = ProcData(decode_output=decode_output)
+
     with subprocess.Popen(
         args,
-        stdin=None if input is None else subprocess.PIPE,
+        stdin=None if input is None else PIPE,
         stdout=stdout,
         stderr=stderr,
         cwd=cwd,
         **kwargs,
-    ) as cmd_desc:
-        if input and cmd_desc.stdin:
-            cmd_desc.stdin.write(input)
-            cmd_desc.stdin.flush()
-        if stdout and isinstance(cmd_desc.stdout, collections.abc.Iterable):
-            for raw_line in cmd_desc.stdout:
-                line: str = raw_line.decode()
-                LOGGER.debug(
-                    *_fmt_proc_output(
-                        ProcStream.OUTPUT if stderr == subprocess.STDOUT else ProcStream.STDOUT,
-                        line,
-                    )
-                )
-                res["stdout"] += line if decode_output else raw_line
-        if stderr and isinstance(cmd_desc.stderr, collections.abc.Iterable) and stderr != subprocess.STDOUT:
-            for raw_line in cmd_desc.stderr:
-                line = raw_line.decode()
-                LOGGER.debug(*_fmt_proc_output(ProcStream.STDERR, line))
-                res["stderr"] += line if decode_output else raw_line
-    res["retcode"] = cmd_desc.returncode
-    if not ignore_retcode and res["retcode"] != 0:
-        LOGGER.error(f"`{shlex.join(args)}` returned: {res['retcode']!r}")
-        if res["stdout"]:
-            LOGGER.error(res["stdout"])
-        if res["stderr"]:
-            LOGGER.error(res["stderr"])
-    return res
+    ) as proc_desc:
+        if input is not None:
+            proc_desc.stdin.write(input)
+            proc_desc.stdin.flush()
+        if stdout:
+            proc_data.stdout = _iterate_proc_output(
+                proc_desc.stdout, ProcStreamClassifier.OUTPUT if stderr == STDOUT else ProcStreamClassifier.STDOUT
+            )
+        if stderr and stderr != STDOUT:
+            proc_data.stderr = _iterate_proc_output(proc_desc.stderr, ProcStreamClassifier.STDERR)
+    proc_data.retcode = proc_desc.returncode
+
+    _display_proc_result(args, ignore_retcode, proc_data)
+    return proc_data
+
+
+async def exec_cmd_async(
+    args: list[str],
+    input: bytes | None = None,
+    stdout: int | None = PIPE,
+    stderr: int | None = PIPE,
+    cwd: str | None = None,
+    ignore_retcode: bool = False,
+    decode_output: bool = True,
+    **kwargs,
+) -> ProcData:
+    """
+    Similar to `exec_cmd()` but using `asyncio` subprocess primitives.
+
+    Except for `ignore_retcode`, and `decode_output`, the arguments are identical to `asyncio.create_subprocess_exec()` and are
+    passed directly to that function, which pass the remainder to `subprocess.Popen()`.
+    """
+    LOGGER.debug(*_fmt_proc_cmd(args))
+    proc_data = ProcData(decode_output=decode_output)
+    proc_desc = asyncio.create_subprocess_exec(
+        args[0],
+        *args[1:],
+        stdin=None if input is None else PIPE,
+        stdout=stdout,
+        stderr=stderr,
+        cwd=cwd,
+        **kwargs,
+    )
+    if input is not None:
+        proc_desc.stdin.write(input)
+        proc_desc.stdin.flush()
+    if stdout:
+        proc_data.stdout = _iterate_proc_output_async(
+            proc_desc.stdout, ProcStreamClassifier.OUTPUT if stderr == STDOUT else ProcStreamClassifier.STDOUT
+        )
+    if stderr and stderr != STDOUT:
+        proc_data.stderr = _iterate_proc_output_async(proc_desc.stderr, ProcStreamClassifier.STDERR)
+    proc_data.retcode = proc_desc.returncode
+
+    _display_proc_result(args, ignore_retcode, proc_data)
+    return proc_data
 
 
 def get_answer(prompt: str, accept: list[str], lower: bool = True) -> bool:
