@@ -1,15 +1,15 @@
 [project]
 name = "xjfx"
-version = "1.1.0"
+version = "1.2.0"
 authors = [
   { name="Justin Findlay", email="justin@findlay.space" },
 ]
 description = "Collection of simple utility functions and classes that extend standard library functionality."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: OS Independent",
 ]
 dependencies = [
@@ -22,9 +22,17 @@ dependencies = [
 
 [build-system]
 requires = [
+    "black",
     "build",
+    "isort",
+    "mypy",
+    "pylint",
+    "pytest",
+    "pyupgrade",
+    "ruff",
     "setuptools",
-    "tox>=4.0",
+    "tox>=4.19",
+    "types-colorama",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -43,6 +51,7 @@ disable = [
     "redefined-builtin",
     "too-few-public-methods",
     "too-many-arguments",
+    "too-many-positional-arguments",
 ]
 
 [tool.pylint.FORMAT]
@@ -53,3 +62,48 @@ mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
 
 [tool.ruff]
 line-length = 128
+
+
+[tool.tox]
+isolated_build = true
+labels = {"analyze" = ["build", "check_type", "check_import", "check_format", "check_lint"], "edit" = ["annotate_type", "fix_format"]}
+
+# Environments are maximized for parallelizeability, but editing actions cannot be simultaneous
+[tool.tox.env.build]
+package = "wheel"
+wheel_build_env = "any"
+
+# Analyze
+[tool.tox.env.check_type]
+allowlist_externals = ["mypy"]
+deps = ["mypy", "types-colorama"]
+commands = [["mypy", "--exclude", ".*\\.pyi", "src/", "tests/"]]
+
+[tool.tox.env.check_import]
+allowlist_externals = ["isort"]
+deps = ["isort"]
+commands = [["isort", "--skip-glob", "src/**.pyi", "--check", "src/", "tests/"]]
+
+[tool.tox.env.check_format]
+allowlist_externals = ["ruff"]
+deps = ["ruff"]
+commands = [["ruff", "check", "--exclude", "*.pyi", "src/", "tests/"]]
+
+[tool.tox.env.check_lint]
+allowlist_externals = ["pylint"]
+deps = ["pylint"]
+commands = [["pylint", "--ignore-patterns", "^.*\\.pyi$", "src/", "tests/"]]
+
+# Edit
+[tool.tox.env.annotate_type]
+allowlist_externals = ["stubgen"]
+deps = ["mypy"]
+commands = [["stubgen", "src/", "-o", "src/"]]
+
+[tool.tox.env.fix_format]
+allowlist_externals = ["isort", "ruff"]
+deps = ["isort", "ruff"]
+commands = [
+    ["isort", "--skip-glob", "src/**.pyi", "src/", "tests/"],
+    ["ruff", "format", "--exclude", "*.pyi", "src/", "tests/"],
+]
