@@ -1,6 +1,6 @@
 [project]
 name = "xjfx"
-version = "1.2.0"
+version = "1.2.1"
 authors = [
   { name="Justin Findlay", email="justin@findlay.space" },
 ]
@@ -25,7 +25,6 @@ requires = [
     "black",
     "build",
     "isort",
-    "mypy",
     "pylint",
     "pytest",
     "pyupgrade",
@@ -38,7 +37,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["xjfx"]
+packages = ["xjfx"]
+
+[tool.setuptools.package-data]
+xjfx = ["py.typed"]
 
 
 [tool.pylint."MESSAGES CONTROL"]
@@ -66,7 +68,7 @@ line-length = 128
 
 [tool.tox]
 isolated_build = true
-labels = {"analyze" = ["build", "check_type", "check_import", "check_format", "check_lint"], "edit" = ["annotate_type", "fix_format"]}
+labels = {"analyze" = ["build", "check_type", "check_import", "check_format", "check_lint"], "edit" = ["fix_format"]}
 
 # Environments are maximized for parallelizeability, but editing actions cannot be simultaneous
 [tool.tox.env.build]
@@ -77,33 +79,28 @@ wheel_build_env = "any"
 [tool.tox.env.check_type]
 allowlist_externals = ["mypy"]
 deps = ["mypy", "types-colorama"]
-commands = [["mypy", "--exclude", ".*\\.pyi", "src/", "tests/"]]
+commands = [["mypy", "src/", "tests/"]]
 
 [tool.tox.env.check_import]
 allowlist_externals = ["isort"]
 deps = ["isort"]
-commands = [["isort", "--skip-glob", "src/**.pyi", "--check", "src/", "tests/"]]
+commands = [["isort", "--check", "src/", "tests/"]]
 
 [tool.tox.env.check_format]
 allowlist_externals = ["ruff"]
 deps = ["ruff"]
-commands = [["ruff", "check", "--exclude", "*.pyi", "src/", "tests/"]]
+commands = [["ruff", "check", "src/", "tests/"]]
 
 [tool.tox.env.check_lint]
 allowlist_externals = ["pylint"]
 deps = ["pylint"]
-commands = [["pylint", "--ignore-patterns", "^.*\\.pyi$", "src/", "tests/"]]
+commands = [["pylint", "src/", "tests/"]]
 
 # Edit
-[tool.tox.env.annotate_type]
-allowlist_externals = ["stubgen"]
-deps = ["mypy"]
-commands = [["stubgen", "src/", "-o", "src/"]]
-
 [tool.tox.env.fix_format]
 allowlist_externals = ["isort", "ruff"]
 deps = ["isort", "ruff"]
 commands = [
-    ["isort", "--skip-glob", "src/**.pyi", "src/", "tests/"],
-    ["ruff", "format", "--exclude", "*.pyi", "src/", "tests/"],
+    ["isort", "src/", "tests/"],
+    ["ruff", "format", "src/", "tests/"],
 ]
