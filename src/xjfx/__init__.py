@@ -6,23 +6,32 @@ need to `import subprocess`.
 
 """
 
-import collections.abc
-import concurrent.futures
 import enum
 import itertools
 import logging
 import shlex
-import subprocess
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from subprocess import DEVNULL  # noqa: F401, pylint: disable=unused-import
+from subprocess import PIPE, STDOUT, Popen
 from types import TracebackType
 from typing import IO, overload
 
 import colorama
 
-DEVNULL = subprocess.DEVNULL
-STDOUT = subprocess.STDOUT
-PIPE = subprocess.PIPE
+__all__ = [
+    "DEVNULL",
+    "PIPE",
+    "ProcData",
+    "STDOUT",
+    "exec_cmd",
+    "get_answer",
+    "get_yes",
+    "grouper",
+    "setup_logging",
+    "thr_exec",
+]
 logger = logging.getLogger(__name__)
 
 
@@ -147,7 +156,7 @@ def exec_cmd(
     """
     logger.debug(*_fmt_proc_cmd(args))
 
-    with subprocess.Popen(
+    with Popen(
         args,
         stdin=None if input is None else PIPE,
         stdout=stdout,
@@ -158,9 +167,9 @@ def exec_cmd(
         if input is not None and proc_desc.stdin is not None:
             proc_desc.stdin.write(input)
             proc_desc.stdin.close()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as io_pool:
-            stdout_future: concurrent.futures.Future[bytes | str] | None = None
-            stderr_future: concurrent.futures.Future[bytes | str] | None = None
+        with ThreadPoolExecutor(max_workers=2) as io_pool:
+            stdout_future: Future[bytes | str] | None = None
+            stderr_future: Future[bytes | str] | None = None
             if stdout and proc_desc.stdout is not None:
                 stdout_future = io_pool.submit(
                     _iterate_proc_output,
@@ -276,7 +285,7 @@ class GrouperIncomplete(enum.Enum):
 
 
 def grouper(
-    i: collections.abc.Sequence[object],
+    i: Sequence[object],
     n: int,
     incomplete: GrouperIncomplete = GrouperIncomplete.FILL,
     fillvalue: object = None,
@@ -306,15 +315,13 @@ def grouper(
             return itertools.chain(zip(*args), remainder)
 
 
-def thr_exec(
-    func: collections.abc.Callable[..., object], args: list[tuple[object, ...]], max_workers: int | None = None
-) -> None:
+def thr_exec(func: Callable[..., object], args: list[tuple[object, ...]], max_workers: int | None = None) -> None:
     """
     Special case reduction for executing a set of parallel tasks in a thread pool.
     """
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool_exec:
-        futures: dict[concurrent.futures.Future[object], tuple[object, ...]] = {pool_exec.submit(func, *al): al for al in args}
-        for future in concurrent.futures.as_completed(futures):
+    with ThreadPoolExecutor(max_workers=max_workers) as pool_exec:
+        futures: dict[Future[object], tuple[object, ...]] = {pool_exec.submit(func, *al): al for al in args}
+        for future in as_completed(futures):
             try:
                 future.result()
             except Exception as ex:  # pylint: disable=broad-exception-caught

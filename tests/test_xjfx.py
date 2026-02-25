@@ -2,9 +2,9 @@
 Scenario tests for each public function in xjfx.
 """
 
-import collections.abc
 import logging
-import pathlib
+from collections.abc import Generator, Iterator
+from pathlib import Path
 
 import pytest
 from pytest_mock import MockerFixture
@@ -17,7 +17,7 @@ import xjfx
 
 
 @pytest.fixture()
-def restore_logging() -> collections.abc.Generator[None, None, None]:
+def restore_logging() -> Generator[None, None, None]:
     """
     Restore the log record factory, root logger level, and root logger handlers
     after every test so that `setup_logging` calls do not leak state across tests.
@@ -76,7 +76,7 @@ def test_exec_cmd_with_input() -> None:
     assert result.stdout == b"hello\n"
 
 
-def test_exec_cmd_with_cwd(tmp_path: pathlib.Path) -> None:
+def test_exec_cmd_with_cwd(tmp_path: Path) -> None:
     """The `cwd` argument changes the working directory of the subprocess."""
     result = xjfx.exec_cmd(["pwd"], cwd=str(tmp_path))
     assert result.stdout.strip() == str(tmp_path).encode()
@@ -306,7 +306,7 @@ def test_grouper_empty_input(mode: xjfx.GrouperIncomplete) -> None:
 def test_grouper_returns_iterator() -> None:
     """grouper returns a lazy iterator, not a materialised list."""
     result = xjfx.grouper("ABCDEF", 3)
-    assert isinstance(result, collections.abc.Iterator)
+    assert isinstance(result, Iterator)
 
 
 # ---------------------------------------------------------------------------
