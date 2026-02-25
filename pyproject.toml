@@ -74,9 +74,13 @@ package = "wheel"
 wheel_build_env = "any"
 
 # Analyze
+[tool.tox.env.py]
+deps = ["pytest", "pytest-mock"]
+commands = [["pytest", "tests/"]]
+
 [tool.tox.env.check_type]
 allowlist_externals = ["mypy"]
-deps = ["mypy", "types-colorama"]
+deps = ["mypy", "pytest-mock", "types-colorama"]
 commands = [["mypy", "src/", "tests/"]]
 
 [tool.tox.env.check_import]
@@ -91,7 +95,7 @@ commands = [["ruff", "check", "src/", "tests/"]]
 
 [tool.tox.env.check_lint]
 allowlist_externals = ["pylint"]
-deps = ["pylint"]
+deps = ["pylint", "pytest", "pytest-mock"]
 commands = [["pylint", "src/", "tests/"]]
 
 # Edit

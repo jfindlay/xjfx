@@ -166,7 +166,7 @@ def exec_cmd(
     ) as proc_desc:
         if input is not None and proc_desc.stdin is not None:
             proc_desc.stdin.write(input)
-            proc_desc.stdin.flush()
+            proc_desc.stdin.close()
         if stdout and proc_desc.stdout is not None:
             proc_data.stdout = _iterate_proc_output(
                 proc_desc.stdout,
@@ -177,6 +177,8 @@ def exec_cmd(
                 proc_desc.stderr,
                 ProcStreamClassifier.STDERR,
             )
+
+    proc_data.retcode = proc_desc.returncode
 
     if not ignore_retcode and proc_data.retcode != 0:
         _display_proc_error(args, proc_data)
