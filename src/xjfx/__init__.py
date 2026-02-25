@@ -3,12 +3,11 @@ Collection of simple utility functions and classes that extend standard library 
 
 For convenience, the `DEVNULL`, `STDOUT`, and `PIPE` constants are imported from `subprocess` so that users of `xjfx` do not
 need to `import subprocess`.
-"""
 
-# TODO:
-# - Tests
-# - exec_cmd
-# 	- Multiproc support (including logging) for watching proc stdout and stderr in real time
+TODO:
+- exec_cmd
+  - Multiproc support (including logging) for watching proc stdout and stderr in real time
+"""
 
 import collections.abc
 import concurrent.futures
@@ -17,9 +16,10 @@ import itertools
 import logging
 import shlex
 import subprocess
-import types
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from typing import IO, Iterator, Mapping, overload
+from types import TracebackType
+from typing import IO, overload
 
 import colorama
 
@@ -246,7 +246,7 @@ def setup_logging(level: int = logging.INFO) -> None:
             lineno: int,
             msg: object,
             args: tuple[object, ...] | Mapping[str, object] | None,
-            exc_info: (tuple[type[BaseException], BaseException, types.TracebackType | None] | tuple[None, None, None] | None),
+            exc_info: (tuple[type[BaseException], BaseException, TracebackType | None] | tuple[None, None, None] | None),
             func: str | None = None,
             sinfo: str | None = None,
         ) -> None:
@@ -317,5 +317,5 @@ def thr_exec(
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()
-            except Exception as ex:
+            except Exception as ex:  # pylint: disable=broad-exception-caught
                 logger.error(f"Error executing task: {ex}")

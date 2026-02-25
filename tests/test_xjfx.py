@@ -16,7 +16,7 @@ import xjfx
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture()
 def restore_logging() -> collections.abc.Generator[None, None, None]:
     """
     Restore the log record factory, root logger level, and root logger handlers
@@ -184,6 +184,7 @@ def test_get_yes_negative(mocker: MockerFixture) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("restore_logging")
 def test_setup_logging_installs_color_factory() -> None:
     """setup_logging replaces the default log record factory with ColorLogRecord."""
     xjfx.setup_logging()
@@ -191,6 +192,7 @@ def test_setup_logging_installs_color_factory() -> None:
     assert factory.__name__ == "ColorLogRecord"
 
 
+@pytest.mark.usefixtures("restore_logging")
 def test_setup_logging_record_has_color_attrs() -> None:
     """Records produced by the installed factory carry the three color attributes."""
     xjfx.setup_logging()
@@ -201,6 +203,7 @@ def test_setup_logging_record_has_color_attrs() -> None:
         assert isinstance(getattr(record, attr), str)
 
 
+@pytest.mark.usefixtures("restore_logging")
 def test_setup_logging_sets_level(mocker: MockerFixture) -> None:
     """The level argument is forwarded to basicConfig."""
     mock_basicconfig = mocker.patch("logging.basicConfig")
@@ -211,6 +214,7 @@ def test_setup_logging_sets_level(mocker: MockerFixture) -> None:
     )
 
 
+@pytest.mark.usefixtures("restore_logging")
 def test_setup_logging_unknown_levelname_raises() -> None:
     """
     ColorLogRecord.__init__ performs a dict lookup on levelname; a level integer

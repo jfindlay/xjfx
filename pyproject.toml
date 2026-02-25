@@ -44,10 +44,6 @@ xjfx = ["py.typed"]
 
 [tool.pylint."MESSAGES CONTROL"]
 disable = [
-    "broad-exception-caught",
-    "consider-using-sys-exit",
-    "fixme",
-    "inconsistent-return-statements",
     "logging-fstring-interpolation",
     "redefined-builtin",
     "too-few-public-methods",
@@ -66,7 +62,7 @@ line-length = 128
 
 [tool.tox]
 isolated_build = true
-labels = {"analyze" = ["build", "check_type", "check_import", "check_format", "check_lint"], "edit" = ["fix_format"]}
+labels = {"analyze" = ["build", "test", "check_type", "check_import", "check_format", "check_lint"], "edit" = ["fix_format"]}
 
 # Environments are maximized for parallelizeability, but editing actions cannot be simultaneous
 [tool.tox.env.build]
@@ -74,7 +70,7 @@ package = "wheel"
 wheel_build_env = "any"
 
 # Analyze
-[tool.tox.env.py]
+[tool.tox.env.test]
 deps = ["pytest", "pytest-mock"]
 commands = [["pytest", "tests/"]]
 
@@ -82,6 +78,11 @@ commands = [["pytest", "tests/"]]
 allowlist_externals = ["mypy"]
 deps = ["mypy", "pytest-mock", "types-colorama"]
 commands = [["mypy", "src/", "tests/"]]
+
+[tool.tox.env.check_upgrade]
+allowlist_externals = ["bash"]
+deps = ["pyupgrade"]
+commands = [["bash", "-c", "shopt -s globstar; pyupgrade --py311-plus src/**/*.py tests/**/*.py"]]
 
 [tool.tox.env.check_import]
 allowlist_externals = ["isort"]
@@ -100,9 +101,10 @@ commands = [["pylint", "src/", "tests/"]]
 
 # Edit
 [tool.tox.env.fix_format]
-allowlist_externals = ["isort", "ruff"]
-deps = ["isort", "ruff"]
+allowlist_externals = ["bash", "isort", "ruff"]
+deps = ["pyupgrade", "isort", "ruff"]
 commands = [
+    ["bash", "-c", "shopt -s globstar; pyupgrade --exit-zero-even-if-changed --py311-plus src/**/*.py tests/**/*.py"],
     ["isort", "src/", "tests/"],
     ["ruff", "format", "src/", "tests/"],
 ]
