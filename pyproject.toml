@@ -42,7 +42,6 @@ packages = ["xjfx"]
 [tool.setuptools.package-data]
 xjfx = ["py.typed"]
 
-
 [tool.pylint."MESSAGES CONTROL"]
 disable = [
     "broad-exception-caught",
@@ -64,7 +63,6 @@ mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
 
 [tool.ruff]
 line-length = 128
-
 
 [tool.tox]
 isolated_build = true

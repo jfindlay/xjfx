@@ -10,16 +10,16 @@ need to `import subprocess`.
 # - exec_cmd
 # 	- Multiproc support (including logging) for watching proc stdout and stderr in real time
 
-import collections
+import collections.abc
 import concurrent.futures
 import enum
-import io
 import itertools
 import logging
 import shlex
 import subprocess
-import typing
+import types
 from dataclasses import dataclass
+from typing import IO, Iterator, Mapping, overload
 
 import colorama
 
@@ -70,12 +70,13 @@ def _fmt_proc_output(stream_class: ProcStreamClassifier, line: str) -> list[str]
     Format stdout/stderr logging output.
     """
     fore_color = ""
-    if stream_class == ProcStreamClassifier.OUTPUT:
-        fore_color = colorama.Fore.LIGHTBLACK_EX
-    if stream_class == ProcStreamClassifier.STDOUT:
-        fore_color = colorama.Fore.BLUE
-    elif stream_class == ProcStreamClassifier.STDERR:
-        fore_color = colorama.Fore.YELLOW
+    match stream_class:
+        case ProcStreamClassifier.OUTPUT:
+            fore_color = colorama.Fore.LIGHTBLACK_EX
+        case ProcStreamClassifier.STDOUT:
+            fore_color = colorama.Fore.BLUE
+        case ProcStreamClassifier.STDERR:
+            fore_color = colorama.Fore.YELLOW
     return [
         # Sometimes the cmd output does not return to the line beginning, so force carriage return
         "    %s[%s]%s %s%s%s\r",
@@ -88,29 +89,44 @@ def _fmt_proc_output(stream_class: ProcStreamClassifier, line: str) -> list[str]
     ]
 
 
-def _iterate_proc_output(stream: io.BytesIO | None, stream_class: ProcStreamClassifier) -> bytes:
+@overload
+def _iterate_proc_output(stream: IO[bytes], stream_class: ProcStreamClassifier) -> bytes: ...
+
+
+@overload
+def _iterate_proc_output(stream: IO[str], stream_class: ProcStreamClassifier) -> str: ...
+
+
+def _iterate_proc_output(stream: IO[bytes] | IO[str], stream_class: ProcStreamClassifier) -> bytes | str:
     """
     Iterate over the process's stdout/stderr.
     """
-    accumulated_output = b""
-    for raw_line in stream or []:
-        logger.debug(*_fmt_proc_output(stream_class, raw_line.decode()))
-        accumulated_output += raw_line
-    return accumulated_output
+    accumulated_bytes: bytes = b""
+    accumulated_str: str = ""
+    is_binary = isinstance(stream.read(0), bytes)
+    for raw_line in stream:
+        if is_binary:
+            assert isinstance(raw_line, bytes)
+            logger.debug(*_fmt_proc_output(stream_class, raw_line.decode()))
+            accumulated_bytes += raw_line
+        else:
+            assert isinstance(raw_line, str)
+            logger.debug(*_fmt_proc_output(stream_class, raw_line))
+            accumulated_str += raw_line
+    return accumulated_bytes if is_binary else accumulated_str
 
 
-def _display_proc_result(args: list[str], ignore_retcode: bool, proc_data: ProcData) -> None:
+def _display_proc_error(args: list[str], proc_data: ProcData) -> None:
     """
     Show command data in the case of error.
     """
-    if not ignore_retcode and proc_data.retcode != 0:
-        logger.error(f"`{shlex.join(args)}` returned: {proc_data.retcode!r}")
-        # If the log level is debug or lower, this info was already logged.
-        if logger.getEffectiveLevel() > logging.DEBUG:
-            if proc_data.stdout:
-                logger.error(proc_data.stdout)
-            if proc_data.stderr:
-                logger.error(proc_data.stderr)
+    logger.error(f"`{shlex.join(args)}` returned: {proc_data.retcode!r}")
+    # If the log level is debug or lower, this info was already logged.
+    if logger.getEffectiveLevel() > logging.DEBUG:
+        if proc_data.stdout:
+            logger.error(proc_data.stdout)
+        if proc_data.stderr:
+            logger.error(proc_data.stderr)
 
 
 def exec_cmd(
@@ -138,8 +154,7 @@ def exec_cmd(
     """
     logger.debug(*_fmt_proc_cmd(args))
 
-    stdout_data: bytes | str
-    stderr_data: bytes | str
+    proc_data = ProcData(stdout="", stderr="", retcode=0)
 
     with subprocess.Popen(
         args,
@@ -152,19 +167,19 @@ def exec_cmd(
         if input is not None and proc_desc.stdin is not None:
             proc_desc.stdin.write(input)
             proc_desc.stdin.flush()
-        if stdout:
-            stdout_data = _iterate_proc_output(
-                proc_desc.stdout,  # type: ignore[arg-type]
+        if stdout and proc_desc.stdout is not None:
+            proc_data.stdout = _iterate_proc_output(
+                proc_desc.stdout,
                 (ProcStreamClassifier.OUTPUT if stderr == STDOUT else ProcStreamClassifier.STDOUT),
             )
-        if stderr and stderr != STDOUT:
-            stderr_data = _iterate_proc_output(
-                proc_desc.stderr,  # type: ignore[arg-type]
+        if stderr and stderr != STDOUT and proc_desc.stderr is not None:
+            proc_data.stderr = _iterate_proc_output(
+                proc_desc.stderr,
                 ProcStreamClassifier.STDERR,
             )
-    proc_data = ProcData(stdout_data, stderr_data, proc_desc.returncode)
 
-    _display_proc_result(args, ignore_retcode, proc_data)
+    if not ignore_retcode and proc_data.retcode != 0:
+        _display_proc_error(args, proc_data)
     return proc_data
 
 
@@ -185,14 +200,14 @@ def get_answer(prompt: str, accept: list[str], lower: bool = True) -> bool:
     return False
 
 
-def get_yes(prompt: str):
+def get_yes(prompt: str) -> bool:
     """
     Get a yes/no answer.
     """
     return get_answer(f"{prompt} [Y|n]", accept=["yes", "y", ""])
 
 
-def setup_logging(level: int = logging.INFO):
+def setup_logging(level: int = logging.INFO) -> None:
     """
     Default to colorized logging using `colorama` and predefined colorized format specs.
     """
@@ -202,33 +217,41 @@ def setup_logging(level: int = logging.INFO):
         Add colors to logging output
         """
 
-        colors: dict[str, dict[str, str] | str] = {
-            "lvls": {
-                "CRITICAL": colorama.Fore.RED + colorama.Style.BRIGHT,
-                "ERROR": colorama.Fore.RED + colorama.Style.BRIGHT,
-                "WARNING": colorama.Fore.YELLOW + colorama.Style.BRIGHT,
-                "INFO": colorama.Fore.GREEN + colorama.Style.BRIGHT,
-                "DEBUG": colorama.Fore.CYAN + colorama.Style.BRIGHT,
-                "NOTSET": colorama.Fore.WHITE + colorama.Style.BRIGHT,
-            },
-            "msgs": {
-                "CRITICAL": colorama.Fore.RED + colorama.Style.BRIGHT,
-                "ERROR": colorama.Fore.RED,
-                "WARNING": colorama.Fore.YELLOW,
-                "INFO": colorama.Fore.GREEN,
-                "DEBUG": colorama.Fore.CYAN,
-                "NOTSET": colorama.Fore.WHITE,
-            },
-            "name": colorama.Fore.GREEN + colorama.Style.BRIGHT,
-            "proc": colorama.Fore.BLUE + colorama.Style.BRIGHT,
-            "reset": colorama.Style.RESET_ALL,
+        lvl_colors: dict[str, str] = {
+            "CRITICAL": colorama.Fore.RED + colorama.Style.BRIGHT,
+            "ERROR": colorama.Fore.RED + colorama.Style.BRIGHT,
+            "WARNING": colorama.Fore.YELLOW + colorama.Style.BRIGHT,
+            "INFO": colorama.Fore.GREEN + colorama.Style.BRIGHT,
+            "DEBUG": colorama.Fore.CYAN + colorama.Style.BRIGHT,
+            "NOTSET": colorama.Fore.WHITE + colorama.Style.BRIGHT,
         }
+        msg_colors: dict[str, str] = {
+            "CRITICAL": colorama.Fore.RED + colorama.Style.BRIGHT,
+            "ERROR": colorama.Fore.RED,
+            "WARNING": colorama.Fore.YELLOW,
+            "INFO": colorama.Fore.GREEN,
+            "DEBUG": colorama.Fore.CYAN,
+            "NOTSET": colorama.Fore.WHITE,
+        }
+        name_color: str = colorama.Fore.GREEN + colorama.Style.BRIGHT
+        reset: str = colorama.Style.RESET_ALL
 
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.colorname = f"{self.colors['name']}[{self.name:17}]{self.colors['reset']}"
-            self.colorlevel = f"{self.colors['lvls'][self.levelname]}[{self.levelname:8}]{self.colors['reset']}"
-            self.colormsg = f"{self.colors['msgs'][self.levelname]} {self.getMessage()}{self.colors['reset']}"
+        def __init__(
+            self,
+            name: str,
+            level: int,
+            pathname: str,
+            lineno: int,
+            msg: object,
+            args: tuple[object, ...] | Mapping[str, object] | None,
+            exc_info: (tuple[type[BaseException], BaseException, types.TracebackType | None] | tuple[None, None, None] | None),
+            func: str | None = None,
+            sinfo: str | None = None,
+        ) -> None:
+            super().__init__(name, level, pathname, lineno, msg, args, exc_info, func, sinfo)
+            self.colorname = f"{self.name_color}[{self.name:17}]{self.reset}"
+            self.colorlevel = f"{self.lvl_colors[self.levelname]}[{self.levelname:8}]{self.reset}"
+            self.colormsg = f"{self.msg_colors[self.levelname]} {self.getMessage()}{self.reset}"
 
     logging.setLogRecordFactory(ColorLogRecord)
     logging.basicConfig(format="%(colorlevel)s%(colormsg)s", level=level)
@@ -251,11 +274,11 @@ class GrouperIncomplete(enum.Enum):
 
 
 def grouper(
-    i: tuple | list,
+    i: collections.abc.Sequence[object],
     n: int,
     incomplete: GrouperIncomplete = GrouperIncomplete.FILL,
-    fillvalue: typing.Any = None,
-):
+    fillvalue: object = None,
+) -> Iterator[tuple[object, ...]]:
     """
     Collect data into non-overlapping chunks or blocks.  (Why is this functionality not part of the official `itertools` API?)
 
@@ -268,25 +291,28 @@ def grouper(
     ```
     """
     args = [iter(i)] * n
-    if incomplete == GrouperIncomplete.FILL:
-        return itertools.zip_longest(*args, fillvalue=fillvalue)
-    if incomplete == GrouperIncomplete.STRICT:
-        return zip(*args, strict=True)
-    if incomplete == GrouperIncomplete.IGNORE:
-        return zip(*args)
-    if incomplete == GrouperIncomplete.REMAINDER:
-        # Can u read it?  One more, unitary iterator for the remainder.
-        remainder = iter([tuple(i[-(len(i) % n) :])]) if len(i) % n != 0 else iter(())
-        return itertools.chain(zip(*args), remainder)
-    raise ValueError("Expected one of {', '.join(GrouperIncomplete)}")
+    match incomplete:
+        case GrouperIncomplete.FILL:
+            return itertools.zip_longest(*args, fillvalue=fillvalue)
+        case GrouperIncomplete.STRICT:
+            return zip(*args, strict=True)
+        case GrouperIncomplete.IGNORE:
+            return zip(*args)
+        case GrouperIncomplete.REMAINDER:
+            # Can u read it?  One more, unitary iterator for the remainder.
+            remainder = iter([tuple(i[-(len(i) % n) :])]) if len(i) % n != 0 else iter(())
+            return itertools.chain(zip(*args), remainder)
 
 
-def thr_exec(func: collections.abc.Callable, args: list[tuple], max_workers: int | None = None):
+def thr_exec(
+    func: collections.abc.Callable[..., object], args: list[tuple[object, ...]], max_workers: int | None = None
+) -> None:
     """
     Special case reduction for executing a set of parallel tasks in a thread pool.
     """
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool_exec:
-        for future in concurrent.futures.as_completed({pool_exec.submit(*(func,) + al): al for al in args}):
+        futures: dict[concurrent.futures.Future[object], tuple[object, ...]] = {pool_exec.submit(func, *al): al for al in args}
+        for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()
             except Exception as ex:
