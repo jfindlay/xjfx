@@ -98,6 +98,29 @@ def test_exec_cmd_ignore_retcode_suppresses_log(mocker: MockerFixture) -> None:
     mock_display.assert_not_called()
 
 
+def test_exec_cmd_concurrent_stdout_stderr() -> None:
+    """
+    Simultaneously capturing stdout and stderr does not deadlock even when each
+    stream carries more than a full pipe buffer (~64 KiB on Linux).
+
+    The old sequential implementation drained stdout to EOF before touching
+    stderr.  If the subprocess filled the stderr pipe buffer before stdout was
+    exhausted, both sides would block forever.
+    """
+    # 128 KiB per stream — well above the typical 64 KiB kernel pipe buffer.
+    # Build the payload inside the child process to avoid hitting ARG_MAX.
+    nbytes = 128 * 1024
+    script = (
+        "import sys; "
+        f"data = 'x' * {nbytes}; "
+        "sys.stdout.write(data); sys.stdout.flush(); "
+        "sys.stderr.write(data); sys.stderr.flush()"
+    )
+    result = xjfx.exec_cmd(["python3", "-c", script])
+    assert len(result.stdout) == nbytes
+    assert len(result.stderr) == nbytes
+
+
 # ---------------------------------------------------------------------------
 # get_answer
 # ---------------------------------------------------------------------------

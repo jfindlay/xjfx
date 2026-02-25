@@ -4,9 +4,6 @@ Collection of simple utility functions and classes that extend standard library 
 For convenience, the `DEVNULL`, `STDOUT`, and `PIPE` constants are imported from `subprocess` so that users of `xjfx` do not
 need to `import subprocess`.
 
-TODO:
-- exec_cmd
-  - Multiproc support (including logging) for watching proc stdout and stderr in real time
 """
 
 import collections.abc
@@ -147,14 +144,8 @@ def exec_cmd(
 
     Except for `ignore_retcode`, the arguments are identical to `subprocess.Popen()` and are passed directly to that
     constructor.
-
-    The `subprocess` module cannot natively watch both stdout and stderr in real time unless stderr is redirected to stdout.
-    Thus, this function can watch stdout or stderr but not both unless they are combined.  Combining stdout and stderr streams
-    by setting `stderr=subprocess.STDOUT` means they will be indistinguishably returned in `proc_data.stdout`.
     """
     logger.debug(*_fmt_proc_cmd(args))
-
-    proc_data = ProcData(stdout="", stderr="", retcode=0)
 
     with subprocess.Popen(
         args,
@@ -167,18 +158,27 @@ def exec_cmd(
         if input is not None and proc_desc.stdin is not None:
             proc_desc.stdin.write(input)
             proc_desc.stdin.close()
-        if stdout and proc_desc.stdout is not None:
-            proc_data.stdout = _iterate_proc_output(
-                proc_desc.stdout,
-                (ProcStreamClassifier.OUTPUT if stderr == STDOUT else ProcStreamClassifier.STDOUT),
-            )
-        if stderr and stderr != STDOUT and proc_desc.stderr is not None:
-            proc_data.stderr = _iterate_proc_output(
-                proc_desc.stderr,
-                ProcStreamClassifier.STDERR,
-            )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as io_pool:
+            stdout_future: concurrent.futures.Future[bytes | str] | None = None
+            stderr_future: concurrent.futures.Future[bytes | str] | None = None
+            if stdout and proc_desc.stdout is not None:
+                stdout_future = io_pool.submit(
+                    _iterate_proc_output,
+                    proc_desc.stdout,
+                    ProcStreamClassifier.OUTPUT if stderr == STDOUT else ProcStreamClassifier.STDOUT,
+                )
+            if stderr and stderr != STDOUT and proc_desc.stderr is not None:
+                stderr_future = io_pool.submit(
+                    _iterate_proc_output,
+                    proc_desc.stderr,
+                    ProcStreamClassifier.STDERR,
+                )
 
-    proc_data.retcode = proc_desc.returncode
+    proc_data = ProcData(
+        stdout="" if stdout_future is None else stdout_future.result(),
+        stderr="" if stderr_future is None else stderr_future.result(),
+        retcode=proc_desc.returncode,
+    )
 
     if not ignore_retcode and proc_data.retcode != 0:
         _display_proc_error(args, proc_data)
