@@ -1,6 +1,6 @@
 [project]
 name = "xjfx"
-version = "1.3.0"
+version = "1.3.1"
 authors = [
   { name="Justin Findlay", email="justin@findlay.space" },
 ]
@@ -9,8 +9,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
 classifiers = [
-    "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
 ]
 dependencies = [
     "colorama",
@@ -33,6 +33,14 @@ packages = ["xjfx"]
 [tool.setuptools.package-data]
 xjfx = ["py.typed"]
 
+[tool.mypy]
+python_version = "3.11"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[tool.pylint.FORMAT]
+max-line-length = 128
+
 [tool.pylint."MESSAGES CONTROL"]
 disable = [
     "logging-fstring-interpolation",
@@ -42,8 +50,8 @@ disable = [
     "too-many-positional-arguments",
 ]
 
-[tool.pylint.FORMAT]
-max-line-length = 128
+[tool.isort]
+profile = "black"
 
 [tool.ruff]
 line-length = 128
@@ -65,7 +73,7 @@ commands = [["pytest", "tests/"]]
 [tool.tox.env.check_type]
 allowlist_externals = ["mypy"]
 deps = ["mypy", "pytest-mock", "types-colorama"]
-commands = [["mypy", "--check-untyped-defs", "src/", "tests/"]]
+commands = [["mypy", "src/", "tests/"]]
 
 [tool.tox.env.check_upgrade]
 allowlist_externals = ["bash"]
@@ -90,7 +98,7 @@ commands = [["pylint", "src/", "tests/"]]
 # Edit
 [tool.tox.env.fix_format]
 allowlist_externals = ["bash", "isort", "ruff"]
-deps = ["pyupgrade", "isort", "ruff"]
+deps = ["isort", "pyupgrade", "ruff"]
 commands = [
     ["bash", "-c", "shopt -s globstar; pyupgrade --exit-zero-even-if-changed --py311-plus src/**/*.py tests/**/*.py"],
     ["isort", "src/", "tests/"],

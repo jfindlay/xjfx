@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from subprocess import DEVNULL  # noqa: F401, pylint: disable=unused-import
 from subprocess import PIPE, STDOUT, Popen
 from types import TracebackType
-from typing import IO, overload
+from typing import IO, Any, overload
 
 import colorama
 
@@ -142,7 +142,7 @@ def exec_cmd(
     stderr: int | None = PIPE,
     cwd: str | None = None,
     ignore_retcode: bool = False,
-    **kwargs,
+    **kwargs: Any,
 ) -> ProcData:
     """
     Run a command line and:
