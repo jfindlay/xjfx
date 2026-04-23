@@ -35,8 +35,7 @@ xjfx = ["py.typed"]
 
 [tool.mypy]
 python_version = "3.11"
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
+strict = true
 
 [tool.pylint.FORMAT]
 max-line-length = 128

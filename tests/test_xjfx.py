@@ -66,8 +66,9 @@ def test_exec_cmd_combined_streams() -> None:
         stderr=xjfx.STDOUT,
     )
     assert b"combined\n" in result.stdout
-    # stderr field retains its initial empty value because it is never populated
-    assert result.stderr == ""
+    # stderr field retains its initial empty value because it is never populated;
+    # bytes-mode (default) yields b"", not ""
+    assert result.stderr == b""
 
 
 def test_exec_cmd_with_input() -> None:
@@ -96,6 +97,19 @@ def test_exec_cmd_ignore_retcode_suppresses_log(mocker: MockerFixture) -> None:
     result = xjfx.exec_cmd(["false"], ignore_retcode=True)
     assert result.retcode == 1
     mock_display.assert_not_called()
+
+
+def test_exec_cmd_text_mode_uncaptured_sentinel_is_str() -> None:
+    """With text=True the uncaptured-stream sentinel is '' (str), not b''."""
+    result = xjfx.exec_cmd(
+        ["python3", "-c", "import sys; print('combined', file=sys.stderr)"],
+        stderr=xjfx.STDOUT,
+        text=True,
+    )
+    assert "combined\n" in result.stdout
+    assert result.stderr == ""
+    assert isinstance(result.stdout, str)
+    assert isinstance(result.stderr, str)
 
 
 def test_exec_cmd_concurrent_stdout_stderr() -> None:

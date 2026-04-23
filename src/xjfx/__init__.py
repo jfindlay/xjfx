@@ -122,6 +122,22 @@ def _iterate_proc_output(stream: IO[bytes] | IO[str], stream_class: ProcStreamCl
     return accumulated_bytes if is_binary else accumulated_str
 
 
+def _is_text_mode(kwargs: dict[str, Any]) -> bool:
+    """
+    True when Popen kwargs request text-mode streams.
+
+    Mirrors the conditions used by typeshed's Popen overloads: any of
+    ``text``, ``universal_newlines``, ``encoding``, or ``errors`` enables
+    text mode.
+    """
+    return bool(
+        kwargs.get("text")
+        or kwargs.get("universal_newlines")
+        or kwargs.get("encoding") is not None
+        or kwargs.get("errors") is not None
+    )
+
+
 def _display_proc_error(args: list[str], proc_data: ProcData) -> None:
     """
     Show command data in the case of error.
@@ -183,9 +199,10 @@ def exec_cmd(
                     ProcStreamClassifier.STDERR,
                 )
 
+    empty: bytes | str = "" if _is_text_mode(kwargs) else b""
     proc_data = ProcData(
-        stdout="" if stdout_future is None else stdout_future.result(),
-        stderr="" if stderr_future is None else stderr_future.result(),
+        stdout=empty if stdout_future is None else stdout_future.result(),
+        stderr=empty if stderr_future is None else stderr_future.result(),
         retcode=proc_desc.returncode,
     )
 
