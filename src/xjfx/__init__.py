@@ -6,6 +6,7 @@ need to `import subprocess`.
 
 """
 
+import asyncio
 import enum
 import itertools
 import logging
@@ -22,9 +23,11 @@ import colorama
 
 __all__ = [
     "DEVNULL",
+    "GrouperIncomplete",
     "PIPE",
     "ProcData",
     "STDOUT",
+    "async_exec_cmd",
     "exec_cmd",
     "get_answer",
     "get_yes",
@@ -206,6 +209,102 @@ def exec_cmd(
         retcode=proc_desc.returncode,
     )
 
+    if not ignore_retcode and proc_data.retcode != 0:
+        _display_proc_error(args, proc_data)
+    return proc_data
+
+
+async def _async_iterate_proc_output(
+    stream: asyncio.StreamReader,
+    stream_class: ProcStreamClassifier,
+) -> bytes:
+    """
+    Drain an async subprocess stream, logging each decoded line.
+
+    Reads in chunks rather than line-by-line to avoid the ``asyncio.StreamReader``
+    default 64 KiB per-line limit while still logging individual lines.
+    """
+    accumulated: bytes = b""
+    while True:
+        chunk = await stream.read(4096)
+        if not chunk:
+            break
+        for raw_line in chunk.splitlines(keepends=True):
+            logger.debug(*_fmt_proc_output(stream_class, raw_line.decode()))
+        accumulated += chunk
+    return accumulated
+
+
+async def async_exec_cmd(
+    args: list[str],
+    input: bytes | None = None,
+    stdout: int | None = PIPE,
+    stderr: int | None = PIPE,
+    cwd: str | None = None,
+    ignore_retcode: bool = False,
+    **kwargs: Any,
+) -> ProcData:
+    """
+    Async counterpart to `exec_cmd`.  Runs a subprocess without blocking the event loop.
+
+    Signature and semantics match `exec_cmd` except that ``asyncio.create_subprocess_exec``
+    does not support text-mode streams.  Passing any of ``text``, ``universal_newlines``,
+    ``encoding``, or ``errors`` raises ``ValueError``.  ``ProcData.stdout`` and
+    ``ProcData.stderr`` are always ``bytes``; decode at the callsite if needed.
+    """
+    if _is_text_mode(kwargs):
+        raise ValueError(
+            "async_exec_cmd does not support text-mode streams; "
+            "asyncio.create_subprocess_exec has no text/encoding/errors/universal_newlines "
+            "equivalent.  Decode ProcData.stdout/stderr at the callsite instead."
+        )
+
+    logger.debug(*_fmt_proc_cmd(args))
+
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdin=PIPE if input is not None else None,
+        stdout=stdout,
+        stderr=stderr,
+        cwd=cwd,
+        **kwargs,
+    )
+
+    if input is not None and proc.stdin is not None:
+        proc.stdin.write(input)
+        await proc.stdin.drain()
+        proc.stdin.close()
+
+    # Mirror the truthy-check form used by exec_cmd (L173/L179) rather than
+    # equality-to-PIPE so that raw-fd values behave consistently with sync.
+    stdout_coro = (
+        _async_iterate_proc_output(
+            proc.stdout,
+            ProcStreamClassifier.OUTPUT if stderr == STDOUT else ProcStreamClassifier.STDOUT,
+        )
+        if stdout and proc.stdout is not None
+        else None
+    )
+    stderr_coro = (
+        _async_iterate_proc_output(proc.stderr, ProcStreamClassifier.STDERR)
+        if stderr and stderr != STDOUT and proc.stderr is not None
+        else None
+    )
+
+    # Drain both streams concurrently to avoid pipe-buffer deadlock.
+    # Filter out None so asyncio.gather never receives an absent coroutine.
+    gathered: list[bytes] = list(
+        await asyncio.gather(*[c for c in (stdout_coro, stderr_coro) if c is not None])
+    )
+
+    stdout_data: bytes = gathered[0] if stdout_coro is not None else b""
+    stderr_data: bytes = (
+        gathered[1] if stdout_coro is not None and stderr_coro is not None else gathered[0] if stderr_coro is not None else b""
+    )
+
+    retcode = await proc.wait()
+
+    proc_data = ProcData(stdout=stdout_data, stderr=stderr_data, retcode=retcode)
     if not ignore_retcode and proc_data.retcode != 0:
         _display_proc_error(args, proc_data)
     return proc_data

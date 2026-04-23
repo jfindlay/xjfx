@@ -2,7 +2,9 @@
 Scenario tests for each public function in xjfx.
 """
 
+import asyncio
 import logging
+import time
 from collections.abc import Generator, Iterator
 from pathlib import Path
 
@@ -133,6 +135,123 @@ def test_exec_cmd_concurrent_stdout_stderr() -> None:
     result = xjfx.exec_cmd(["python3", "-c", script])
     assert len(result.stdout) == nbytes
     assert len(result.stderr) == nbytes
+
+
+# ---------------------------------------------------------------------------
+# async_exec_cmd
+# ---------------------------------------------------------------------------
+
+
+def test_async_exec_cmd_captures_stdout() -> None:
+    """stdout is captured and retcode is zero for a simple echo."""
+    result = asyncio.run(xjfx.async_exec_cmd(["echo", "hello"]))
+    assert result.stdout == b"hello\n"
+    assert result.stderr == b""
+    assert result.retcode == 0
+
+
+def test_async_exec_cmd_captures_stderr() -> None:
+    """stderr is captured separately when stdout is discarded."""
+    result = asyncio.run(
+        xjfx.async_exec_cmd(
+            ["python3", "-c", "import sys; print('err', file=sys.stderr)"],
+            stdout=xjfx.DEVNULL,
+        )
+    )
+    assert result.stderr == b"err\n"
+
+
+def test_async_exec_cmd_combined_streams() -> None:
+    """With stderr=STDOUT the error output appears in stdout, not stderr."""
+    result = asyncio.run(
+        xjfx.async_exec_cmd(
+            ["python3", "-c", "import sys; print('combined', file=sys.stderr)"],
+            stderr=xjfx.STDOUT,
+        )
+    )
+    assert b"combined\n" in result.stdout
+    assert result.stderr == b""
+
+
+def test_async_exec_cmd_with_input() -> None:
+    """Bytes provided via ``input`` are forwarded to the subprocess stdin."""
+    result = asyncio.run(xjfx.async_exec_cmd(["cat"], input=b"hello\n"))
+    assert result.stdout == b"hello\n"
+
+
+def test_async_exec_cmd_with_cwd(tmp_path: Path) -> None:
+    """The ``cwd`` argument changes the working directory of the subprocess."""
+    result = asyncio.run(xjfx.async_exec_cmd(["pwd"], cwd=str(tmp_path)))
+    assert result.stdout.strip() == str(tmp_path).encode()
+
+
+def test_async_exec_cmd_nonzero_retcode_logs_error(mocker: MockerFixture) -> None:
+    """A non-zero return code triggers an error log."""
+    mock_error = mocker.patch.object(xjfx.logger, "error")
+    result = asyncio.run(xjfx.async_exec_cmd(["false"]))
+    assert result.retcode == 1
+    mock_error.assert_called()
+
+
+def test_async_exec_cmd_ignore_retcode_suppresses_log(mocker: MockerFixture) -> None:
+    """Setting ignore_retcode=True prevents _display_proc_error from being called."""
+    mock_display = mocker.patch.object(xjfx, "_display_proc_error")
+    result = asyncio.run(xjfx.async_exec_cmd(["false"], ignore_retcode=True))
+    assert result.retcode == 1
+    mock_display.assert_not_called()
+
+
+def test_async_exec_cmd_concurrent_stdout_stderr() -> None:
+    """
+    Simultaneously capturing stdout and stderr does not deadlock even when
+    each stream carries more than a full pipe buffer (~64 KiB on Linux).
+    """
+    nbytes = 128 * 1024
+    script = (
+        "import sys; "
+        f"data = 'x' * {nbytes}; "
+        "sys.stdout.write(data); sys.stdout.flush(); "
+        "sys.stderr.write(data); sys.stderr.flush()"
+    )
+    result = asyncio.run(xjfx.async_exec_cmd(["python3", "-c", script]))
+    assert len(result.stdout) == nbytes
+    assert len(result.stderr) == nbytes
+
+
+def test_async_exec_cmd_rejects_text_mode() -> None:
+    """Passing text-mode kwargs raises ValueError immediately."""
+    for bad_kwargs in (
+        {"text": True},
+        {"universal_newlines": True},
+        {"encoding": "utf-8"},
+        {"errors": "replace"},
+    ):
+        with pytest.raises(ValueError, match="text-mode"):
+            asyncio.run(xjfx.async_exec_cmd(["echo", "hi"], **bad_kwargs))
+
+
+def test_async_exec_cmd_concurrent_invocations() -> None:
+    """
+    Three concurrent async_exec_cmd calls each sleeping 0.5 s complete in
+    roughly 0.5 s wall-clock, not 1.5 s.  This is the load-bearing proof
+    that the event loop is non-blocking.
+    """
+
+    async def main() -> list[xjfx.ProcData]:
+        return list(
+            await asyncio.gather(
+                xjfx.async_exec_cmd(["sleep", "0.5"]),
+                xjfx.async_exec_cmd(["sleep", "0.5"]),
+                xjfx.async_exec_cmd(["sleep", "0.5"]),
+            )
+        )
+
+    start = time.monotonic()
+    results = asyncio.run(main())
+    elapsed = time.monotonic() - start
+
+    assert all(r.retcode == 0 for r in results)
+    assert elapsed < 1.0, f"concurrency broken: {elapsed:.2f}s for 3×0.5s"
 
 
 # ---------------------------------------------------------------------------
