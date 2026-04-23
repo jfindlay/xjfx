@@ -8,14 +8,19 @@ need to `import subprocess`.
 
 import asyncio
 import enum
+import importlib.metadata
 import itertools
 import logging
 import shlex
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from subprocess import DEVNULL  # noqa: F401, pylint: disable=unused-import
-from subprocess import PIPE, STDOUT, Popen
+from subprocess import (
+    DEVNULL,  # noqa: F401, pylint: disable=unused-import
+    PIPE,
+    STDOUT,
+    Popen,
+)
 from types import TracebackType
 from typing import IO, Any, overload
 
@@ -27,6 +32,7 @@ __all__ = [
     "PIPE",
     "ProcData",
     "STDOUT",
+    "__version__",
     "async_exec_cmd",
     "exec_cmd",
     "get_answer",
@@ -35,6 +41,7 @@ __all__ = [
     "setup_logging",
     "thr_exec",
 ]
+__version__: str = importlib.metadata.version(__name__)
 logger = logging.getLogger(__name__)
 
 
@@ -293,9 +300,7 @@ async def async_exec_cmd(
 
     # Drain both streams concurrently to avoid pipe-buffer deadlock.
     # Filter out None so asyncio.gather never receives an absent coroutine.
-    gathered: list[bytes] = list(
-        await asyncio.gather(*[c for c in (stdout_coro, stderr_coro) if c is not None])
-    )
+    gathered: list[bytes] = list(await asyncio.gather(*[c for c in (stdout_coro, stderr_coro) if c is not None]))
 
     stdout_data: bytes = gathered[0] if stdout_coro is not None else b""
     stderr_data: bytes = (

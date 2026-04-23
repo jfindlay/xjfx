@@ -10,26 +10,37 @@ Public API: `DEVNULL`, `PIPE`, `STDOUT` (re-exported from `subprocess`);
 ## CONVENTIONS
 
 - Line length: **128** characters (see `pyproject.toml [tool.ruff] line-length`).
-- Style checker: `ruff check` (tox env `check_format`).
-- Semantic linter: `pylint` (tox env `check_lint`).
-- Formatter: `ruff format` + `isort` + `pyupgrade` (tox env `fix_format`; not
-  verified by the `analyze` label — run manually before submitting).
-- Import order: `isort` with `profile = "black"` (tox env `check_import`).
-- Type checking: `mypy` strict (`strict = true` in `pyproject.toml`; tox env `check_type`).
-- Language level: `pyupgrade --py311-plus` (tox env `check_upgrade`; not in `analyze` label).
+- Dependency + build manager: `uv` (PEP 735 `dev` group; `uv_build` backend).
+- Style / import / upgrade checker: `ruff check` with rules
+  `["E", "W", "F", "I", "UP", "PL"]` (make target `format`).
+- Semantic linter: `pylint` (make target `format` / `pylint`).
+- Formatter: `ruff format` + `ruff check --fix` (make target `format`; alias
+  `fix`).  `isort` and `pyupgrade` have been removed — ruff's `I` and `UP`
+  rules cover them.
+- Type checking: `mypy` strict (make target `type`).
+- Python floor: 3.12.  Tooling targets py312 (`ruff target-version`,
+  `mypy python_version`).
 - Docstrings: single-sentence summary; no sphinx syntax required (xjfx uses
   plain docstrings).
 
 ## VERIFICATION
 
-Run the formatter first, then the full analyze suite:
+First-time setup:
 
 ```bash
-tox -e fix_format   # pyupgrade + isort + ruff format (not checked by analyze)
-tox -m analyze      # build, test, check_type, check_import, check_format, check_lint
+make setup           # uv sync --group dev; generates/updates uv.lock
 ```
 
-All environments must pass. Fix any mypy, ruff, isort, or pylint errors before completing.
+Run the formatter first, then the full check suite:
+
+```bash
+make format          # ruff format + ruff check --fix + mypy + pylint
+make format-check    # build, ruff format-check, ruff check, mypy, pylint, test
+```
+
+All targets must pass. Individual targets (`make type`,
+`make pylint`, `make test`) are available for targeted iteration. Run
+`make -j format-check` for parallel execution if you accept interleaved output.
 
 ## NOTES
 

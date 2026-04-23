@@ -10,32 +10,39 @@ $ pip install xjfx
 
 ## Development
 
-Check for code lint errors:
+First-time setup:
 ```bash
-$ tox run-parallel -m analyze
+$ make setup
 ```
 Enforce code formatting:
 ```bash
-$ tox run-parallel -m edit
+$ make format
 ```
-Both:
+Check for errors (build, lint, types, format, tests):
 ```bash
-$ tox run-parallel -m edit analyze
+$ make format-check
 ```
 
 ### Create a release
 
 0. `VERSION=<version>`
-1. `tox p -m analyze edit`
-2. `python3 -m build --wheel`
-3. `twine check dist/xjfx-$VERSION-py3-none-any.whl`
-4. Update `version` field in `pyproject.toml` to `$VERSION` and `git tag -a $VERSION`
-5. Push `master` and `$VERSION` tag to github
-6. `twine upload --repository testpypi dist/xjfx-$VERSION-py3-none-any.whl`
-7.
-  ```bash
-  $ virtualenv venv
-  $ venv/bin/pip install --index-url https://test.pypi.org/simple/ xjfx
-  $ venv/bin/python -c 'import xjfx'
-  ```
-8. `twine upload --repository pypi dist/xjfx-$VERSION-py3-none-any.whl`
+1. `make format format-check test`
+2. `git tag -a $VERSION -m $VERSION && git tag -ln2 $VERSION && git push github master $VERSION`
+3. `make build`
+4. ```bash
+   $ uv venv /tmp/xjfx-test && uv pip install --python /tmp/xjfx-test dist/xjfx-$VERSION-py3-none-any.whl
+   $ /tmp/xjfx-test/bin/python -c 'import xjfx ; print(xjfx.__version__)'
+   ```
+5. `uvx twine check dist/xjfx-$VERSION-py3-none-any.whl`
+6. `uvx twine upload --repository testpypi dist/xjfx-$VERSION-py3-none-any.whl`
+7. ```bash
+   $ uv venv /tmp/xjfx-test && uv pip install --python /tmp/xjfx-test \
+       --index-url https://test.pypi.org/simple/ xjfx==$VERSION
+   $ /tmp/xjfx-test/bin/python -c 'import xjfx ; print(xjfx.__version__)'
+   ```
+8. `uvx twine upload --repository pypi dist/xjfx-$VERSION-py3-none-any.whl`
+9. ```bash
+   $ uv venv /tmp/xjfx-test && uv pip install --python /tmp/xjfx-test \
+       --index-url https://test.pypi.org/simple/ xjfx==$VERSION
+   $ /tmp/xjfx-test/bin/python -c 'import xjfx ; print(xjfx.__version__)'
+   ```
