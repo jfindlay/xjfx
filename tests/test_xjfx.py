@@ -1,6 +1,4 @@
-"""
-Scenario tests for each public function in xjfx.
-"""
+"""Scenario tests for each public function and class in :mod:`xjfx`."""
 
 import asyncio
 import logging
@@ -20,11 +18,13 @@ import xjfx
 
 @pytest.fixture()
 def restore_logging() -> Generator[None, None, None]:
-    """
-    Restore the log record factory, root logger level, and root logger handlers
-    after every test so that `setup_logging` calls do not leak state across tests.
-    Removing handlers ensures `logging.basicConfig` is not a no-op on subsequent
-    calls within the same process.
+    """Restore root-logger state after each test so ``setup_logging`` calls do not leak.
+
+    Saves the log-record factory, root-logger level, and root-logger handler list before
+    yielding, then restores all three unconditionally.  Removing handlers ensures that
+    :func:`logging.basicConfig` is not a no-op on subsequent calls within the same process.
+
+    :yields: Nothing; the fixture is used purely for its setup/teardown side-effects.
     """
     root = logging.getLogger()
     original_factory = logging.getLogRecordFactory()
@@ -62,7 +62,7 @@ def test_exec_cmd_captures_stderr() -> None:
 
 
 def test_exec_cmd_combined_streams() -> None:
-    """With stderr=STDOUT the error output appears in stdout, not stderr."""
+    """With ``stderr=STDOUT`` the error output appears in stdout, not stderr."""
     result = xjfx.exec_cmd(
         ["python3", "-c", "import sys; print('combined', file=sys.stderr)"],
         stderr=xjfx.STDOUT,
@@ -74,13 +74,13 @@ def test_exec_cmd_combined_streams() -> None:
 
 
 def test_exec_cmd_with_input() -> None:
-    """Bytes provided via `input` are forwarded to the subprocess stdin."""
+    """Bytes provided via ``input`` are forwarded to the subprocess stdin."""
     result = xjfx.exec_cmd(["cat"], input=b"hello\n")
     assert result.stdout == b"hello\n"
 
 
 def test_exec_cmd_with_cwd(tmp_path: Path) -> None:
-    """The `cwd` argument changes the working directory of the subprocess."""
+    """The ``cwd`` argument changes the working directory of the subprocess."""
     result = xjfx.exec_cmd(["pwd"], cwd=str(tmp_path))
     assert result.stdout.strip() == str(tmp_path).encode()
 
@@ -94,7 +94,7 @@ def test_exec_cmd_nonzero_retcode_logs_error(mocker: MockerFixture) -> None:
 
 
 def test_exec_cmd_ignore_retcode_suppresses_log(mocker: MockerFixture) -> None:
-    """Setting ignore_retcode=True prevents _display_proc_error from being called."""
+    """Setting ``ignore_retcode=True`` prevents ``_display_proc_error`` from being called."""
     mock_display = mocker.patch.object(xjfx, "_display_proc_error")
     result = xjfx.exec_cmd(["false"], ignore_retcode=True)
     assert result.retcode == 1
@@ -102,7 +102,7 @@ def test_exec_cmd_ignore_retcode_suppresses_log(mocker: MockerFixture) -> None:
 
 
 def test_exec_cmd_text_mode_uncaptured_sentinel_is_str() -> None:
-    """With text=True the uncaptured-stream sentinel is '' (str), not b''."""
+    """With ``text=True`` the uncaptured-stream sentinel is ``''`` (str), not ``b''``."""
     result = xjfx.exec_cmd(
         ["python3", "-c", "import sys; print('combined', file=sys.stderr)"],
         stderr=xjfx.STDOUT,
@@ -115,15 +115,12 @@ def test_exec_cmd_text_mode_uncaptured_sentinel_is_str() -> None:
 
 
 def test_exec_cmd_concurrent_stdout_stderr() -> None:
-    """
-    Simultaneously capturing stdout and stderr does not deadlock even when each
-    stream carries more than a full pipe buffer (~64 KiB on Linux).
+    """Simultaneously capturing stdout and stderr does not deadlock at pipe-buffer scale.
 
-    The old sequential implementation drained stdout to EOF before touching
-    stderr.  If the subprocess filled the stderr pipe buffer before stdout was
-    exhausted, both sides would block forever.
+    The old sequential implementation drained stdout to EOF before touching stderr.  If the
+    subprocess filled the stderr pipe buffer before stdout was exhausted, both sides would block
+    forever.  Each stream carries 128 KiB — well above the typical 64 KiB Linux pipe buffer.
     """
-    # 128 KiB per stream — well above the typical 64 KiB kernel pipe buffer.
     # Build the payload inside the child process to avoid hitting ARG_MAX.
     nbytes = 128 * 1024
     script = (
@@ -162,7 +159,7 @@ def test_async_exec_cmd_captures_stderr() -> None:
 
 
 def test_async_exec_cmd_combined_streams() -> None:
-    """With stderr=STDOUT the error output appears in stdout, not stderr."""
+    """With ``stderr=STDOUT`` the error output appears in stdout, not stderr."""
     result = asyncio.run(
         xjfx.async_exec_cmd(
             ["python3", "-c", "import sys; print('combined', file=sys.stderr)"],
@@ -194,7 +191,7 @@ def test_async_exec_cmd_nonzero_retcode_logs_error(mocker: MockerFixture) -> Non
 
 
 def test_async_exec_cmd_ignore_retcode_suppresses_log(mocker: MockerFixture) -> None:
-    """Setting ignore_retcode=True prevents _display_proc_error from being called."""
+    """Setting ``ignore_retcode=True`` prevents ``_display_proc_error`` from being called."""
     mock_display = mocker.patch.object(xjfx, "_display_proc_error")
     result = asyncio.run(xjfx.async_exec_cmd(["false"], ignore_retcode=True))
     assert result.retcode == 1
@@ -202,9 +199,9 @@ def test_async_exec_cmd_ignore_retcode_suppresses_log(mocker: MockerFixture) -> 
 
 
 def test_async_exec_cmd_concurrent_stdout_stderr() -> None:
-    """
-    Simultaneously capturing stdout and stderr does not deadlock even when
-    each stream carries more than a full pipe buffer (~64 KiB on Linux).
+    """Simultaneously capturing stdout and stderr does not deadlock at pipe-buffer scale.
+
+    Each stream carries 128 KiB — well above the typical 64 KiB Linux pipe buffer.
     """
     nbytes = 128 * 1024
     script = (
@@ -219,7 +216,7 @@ def test_async_exec_cmd_concurrent_stdout_stderr() -> None:
 
 
 def test_async_exec_cmd_rejects_text_mode() -> None:
-    """Passing text-mode kwargs raises ValueError immediately."""
+    """Passing any text-mode kwarg raises :exc:`ValueError` immediately."""
     for bad_kwargs in (
         {"text": True},
         {"universal_newlines": True},
@@ -231,13 +228,14 @@ def test_async_exec_cmd_rejects_text_mode() -> None:
 
 
 def test_async_exec_cmd_concurrent_invocations() -> None:
-    """
-    Three concurrent async_exec_cmd calls each sleeping 0.5 s complete in
-    roughly 0.5 s wall-clock, not 1.5 s.  This is the load-bearing proof
-    that the event loop is non-blocking.
+    """Three concurrent ``async_exec_cmd`` calls complete in parallel, not serially.
+
+    Each call sleeps 0.5 s; total wall-clock should be roughly 0.5 s, not 1.5 s.
+    This is the load-bearing proof that the event loop is non-blocking.
     """
 
     async def main() -> list[xjfx.ProcData]:
+        """Gather three concurrent sleep subprocesses and return their results."""
         return list(
             await asyncio.gather(
                 xjfx.async_exec_cmd(["sleep", "0.5"]),
@@ -260,7 +258,7 @@ def test_async_exec_cmd_concurrent_invocations() -> None:
 
 
 def test_get_answer_exact_match(mocker: MockerFixture) -> None:
-    """An exact match in the accept list returns True."""
+    """An exact match in the accept list returns ``True``."""
     mocker.patch("builtins.input", return_value="yes")
     assert xjfx.get_answer("prompt", ["yes", "y", ""]) is True
 
@@ -272,27 +270,29 @@ def test_get_answer_empty_string_accepted(mocker: MockerFixture) -> None:
 
 
 def test_get_answer_case_insensitive_input(mocker: MockerFixture) -> None:
-    """Input is lowercased before comparison, so 'YES' matches 'yes'."""
+    """Input is lowercased before comparison, so ``'YES'`` matches ``'yes'``."""
     mocker.patch("builtins.input", return_value="YES")
     assert xjfx.get_answer("prompt", ["yes"]) is True
 
 
 def test_get_answer_lower_false_exact_lower_match(mocker: MockerFixture) -> None:
-    """With lower=False, already-lowercase input still matches a lowercase accept value."""
+    """With ``lower=False``, already-lowercase input still matches a lowercase accept value."""
     mocker.patch("builtins.input", return_value="yes")
     assert xjfx.get_answer("prompt", ["yes"], lower=False) is True
 
 
 def test_get_answer_reject_unknown(mocker: MockerFixture) -> None:
-    """Input not in the accept list returns False."""
+    """Input not in the accept list returns ``False``."""
     mocker.patch("builtins.input", return_value="no")
     assert xjfx.get_answer("prompt", ["yes", "y", ""]) is False
 
 
 def test_get_answer_lower_false_input_always_lowered(mocker: MockerFixture) -> None:
-    """
-    Even with lower=False, input() is unconditionally lowercased before comparison,
-    so 'YES' becomes 'yes' which does not match the accept value 'YES'.
+    """``lower=False`` does not prevent ``input()`` from being lowercased unconditionally.
+
+    The implementation calls ``input(...).lower()`` before the ``lower`` branch, so
+    ``'YES'`` becomes ``'yes'`` regardless of ``lower``, and does not match the accept
+    value ``'YES'``.
     """
     mocker.patch("builtins.input", return_value="YES")
     assert xjfx.get_answer("prompt", ["YES"], lower=False) is False
@@ -304,13 +304,13 @@ def test_get_answer_lower_false_input_always_lowered(mocker: MockerFixture) -> N
 
 
 def test_get_yes_y(mocker: MockerFixture) -> None:
-    """'y' is accepted as an affirmative answer."""
+    """``'y'`` is accepted as an affirmative answer."""
     mocker.patch("builtins.input", return_value="y")
     assert xjfx.get_yes("Continue?") is True
 
 
 def test_get_yes_yes(mocker: MockerFixture) -> None:
-    """'yes' is accepted as an affirmative answer."""
+    """``'yes'`` is accepted as an affirmative answer."""
     mocker.patch("builtins.input", return_value="yes")
     assert xjfx.get_yes("Continue?") is True
 
@@ -322,7 +322,7 @@ def test_get_yes_empty(mocker: MockerFixture) -> None:
 
 
 def test_get_yes_prompt_format(mocker: MockerFixture) -> None:
-    """The prompt passed to input() includes the '[Y|n]' hint."""
+    """The prompt passed to ``input()`` includes the ``[Y|n]`` hint."""
     mock_input = mocker.patch("builtins.input", return_value="y")
     xjfx.get_yes("Continue?")
     prompt_arg: str = mock_input.call_args[0][0]
@@ -330,7 +330,7 @@ def test_get_yes_prompt_format(mocker: MockerFixture) -> None:
 
 
 def test_get_yes_negative(mocker: MockerFixture) -> None:
-    """'n' is not in the accept list and returns False."""
+    """``'n'`` is not in the accept list and returns ``False``."""
     mocker.patch("builtins.input", return_value="n")
     assert xjfx.get_yes("Continue?") is False
 
@@ -342,7 +342,7 @@ def test_get_yes_negative(mocker: MockerFixture) -> None:
 
 @pytest.mark.usefixtures("restore_logging")
 def test_setup_logging_installs_color_factory() -> None:
-    """setup_logging replaces the default log record factory with ColorLogRecord."""
+    """``setup_logging`` replaces the default log-record factory with ``ColorLogRecord``."""
     xjfx.setup_logging()
     factory = logging.getLogRecordFactory()
     assert factory.__name__ == "ColorLogRecord"
@@ -350,7 +350,7 @@ def test_setup_logging_installs_color_factory() -> None:
 
 @pytest.mark.usefixtures("restore_logging")
 def test_setup_logging_record_has_color_attrs() -> None:
-    """Records produced by the installed factory carry the three color attributes."""
+    """Records produced by the installed factory carry the three colorized attributes."""
     xjfx.setup_logging()
     factory = logging.getLogRecordFactory()
     record = factory("test.logger", logging.INFO, "file.py", 1, "hello", None, None)
@@ -361,7 +361,7 @@ def test_setup_logging_record_has_color_attrs() -> None:
 
 @pytest.mark.usefixtures("restore_logging")
 def test_setup_logging_sets_level(mocker: MockerFixture) -> None:
-    """The level argument is forwarded to basicConfig."""
+    """The ``level`` argument is forwarded to :func:`logging.basicConfig`."""
     mock_basicconfig = mocker.patch("logging.basicConfig")
     xjfx.setup_logging(logging.DEBUG)
     mock_basicconfig.assert_called_once_with(
@@ -372,9 +372,10 @@ def test_setup_logging_sets_level(mocker: MockerFixture) -> None:
 
 @pytest.mark.usefixtures("restore_logging")
 def test_setup_logging_unknown_levelname_raises() -> None:
-    """
-    ColorLogRecord.__init__ performs a dict lookup on levelname; a level integer
-    that maps to an unknown name triggers a KeyError.
+    """A level integer with no registered name causes a :exc:`KeyError` in ``ColorLogRecord``.
+
+    ``ColorLogRecord.__init__`` performs a dict lookup on ``levelname``; a level that
+    maps to ``'Level N'`` (the default for unregistered levels) is not in the color maps.
     """
     xjfx.setup_logging()
     factory = logging.getLogRecordFactory()
@@ -389,43 +390,43 @@ def test_setup_logging_unknown_levelname_raises() -> None:
 
 
 def test_grouper_fill_partial() -> None:
-    """FILL pads the last chunk with fillvalue when the input is not evenly divisible."""
+    """``FILL`` pads the last chunk with ``fillvalue`` when the input is not evenly divisible."""
     result = list(xjfx.grouper("ABCDEFG", 3, fillvalue="x"))
     assert result == [("A", "B", "C"), ("D", "E", "F"), ("G", "x", "x")]
 
 
 def test_grouper_fill_exact() -> None:
-    """FILL produces no padding when the input length is a multiple of n."""
+    """``FILL`` produces no padding when the input length is a multiple of ``n``."""
     result = list(xjfx.grouper("ABCDEF", 3))
     assert result == [("A", "B", "C"), ("D", "E", "F")]
 
 
 def test_grouper_strict_exact() -> None:
-    """STRICT succeeds without error when the input is evenly divisible."""
+    """``STRICT`` succeeds without error when the input is evenly divisible."""
     result = list(xjfx.grouper("ABCDEF", 3, xjfx.GrouperIncomplete.STRICT))
     assert result == [("A", "B", "C"), ("D", "E", "F")]
 
 
 def test_grouper_strict_partial_raises() -> None:
-    """STRICT raises ValueError when the last chunk would be incomplete."""
+    """``STRICT`` raises :exc:`ValueError` when the last chunk would be incomplete."""
     with pytest.raises(ValueError):
         list(xjfx.grouper("ABCDEFG", 3, xjfx.GrouperIncomplete.STRICT))
 
 
 def test_grouper_ignore_partial() -> None:
-    """IGNORE silently drops the final incomplete chunk."""
+    """``IGNORE`` silently drops the final incomplete chunk."""
     result = list(xjfx.grouper("ABCDEFG", 3, xjfx.GrouperIncomplete.IGNORE))
     assert result == [("A", "B", "C"), ("D", "E", "F")]
 
 
 def test_grouper_remainder_partial() -> None:
-    """REMAINDER keeps the final incomplete chunk as a shorter tuple."""
+    """``REMAINDER`` keeps the final incomplete chunk as a shorter tuple."""
     result = list(xjfx.grouper("ABCDEFG", 3, xjfx.GrouperIncomplete.REMAINDER))
     assert result == [("A", "B", "C"), ("D", "E", "F"), ("G",)]
 
 
 def test_grouper_remainder_single() -> None:
-    """REMAINDER handles a remainder of one element correctly."""
+    """``REMAINDER`` handles a remainder of exactly one element correctly."""
     result = list(xjfx.grouper([1, 2, 3, 4], 3, xjfx.GrouperIncomplete.REMAINDER))
     assert result == [(1, 2, 3), (4,)]
 
@@ -437,7 +438,7 @@ def test_grouper_empty_input(mode: xjfx.GrouperIncomplete) -> None:
 
 
 def test_grouper_returns_iterator() -> None:
-    """grouper returns a lazy iterator, not a materialised list."""
+    """``grouper`` returns a lazy iterator, not a materialized list."""
     result = xjfx.grouper("ABCDEF", 3)
     assert isinstance(result, Iterator)
 
@@ -452,6 +453,7 @@ def test_thr_exec_all_tasks_run() -> None:
     results: list[int] = []
 
     def collect(x: int) -> None:
+        """Append ``x`` to the shared ``results`` list."""
         results.append(x)
 
     xjfx.thr_exec(collect, [(1,), (2,), (3,)])
@@ -464,10 +466,11 @@ def test_thr_exec_empty_args() -> None:
 
 
 def test_thr_exec_max_workers_respected() -> None:
-    """max_workers=1 forces serial execution; all tasks still complete."""
+    """``max_workers=1`` forces serial execution; all tasks still complete."""
     results: list[int] = []
 
     def collect(x: int) -> None:
+        """Append ``x`` to the shared ``results`` list."""
         results.append(x)
 
     xjfx.thr_exec(collect, [(1,), (2,), (3,)], max_workers=1)
@@ -479,6 +482,7 @@ def test_thr_exec_exception_logged(mocker: MockerFixture) -> None:
     mock_logger = mocker.patch.object(xjfx, "logger")
 
     def explode(x: int) -> None:
+        """Always raise :exc:`RuntimeError` to exercise the exception-handling path."""
         raise RuntimeError("boom")
 
     xjfx.thr_exec(explode, [(1,)])
@@ -490,9 +494,12 @@ def test_thr_exec_exception_logged(mocker: MockerFixture) -> None:
 def test_thr_exec_continues_after_exception() -> None:
     """A failure in one task does not prevent the remaining tasks from running."""
     results: list[int] = []
+    failing_value = 2
 
     def partial_fail(x: int) -> None:
-        if x == 2:
+        """Raise :exc:`RuntimeError` for the designated failing value, otherwise append to
+        ``results``."""
+        if x == failing_value:
             raise RuntimeError("intentional")
         results.append(x)
 

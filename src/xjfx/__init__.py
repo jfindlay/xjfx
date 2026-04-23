@@ -1,9 +1,8 @@
 """
 Collection of simple utility functions and classes that extend standard library functionality.
 
-For convenience, the `DEVNULL`, `STDOUT`, and `PIPE` constants are imported from `subprocess` so that users of `xjfx` do not
-need to `import subprocess`.
-
+For convenience, ``DEVNULL``, ``STDOUT``, and ``PIPE`` are re-exported from :mod:`subprocess`
+so callers do not need a separate ``import subprocess``.
 """
 
 import asyncio
@@ -46,11 +45,11 @@ logger = logging.getLogger(__name__)
 
 
 class ProcStreamClassifier(enum.IntEnum):
-    """
-    Enumerate process "streams" used by the `exec_cmd*` functions.
-    - OUTPUT: Combined stdout/stderr
-    - STDOUT: Standard output
-    - STDERR: Standard error
+    """Enumerate the subprocess stream categories used by the ``exec_cmd`` family.
+
+    :cvar OUTPUT: Combined stdout and stderr (when stderr is redirected to stdout).
+    :cvar STDOUT: Standard output only.
+    :cvar STDERR: Standard error only.
     """
 
     OUTPUT = enum.auto()
@@ -60,8 +59,11 @@ class ProcStreamClassifier(enum.IntEnum):
 
 @dataclass
 class ProcData:
-    """
-    Data returned from a command.
+    """Collected output and exit status from a finished subprocess.
+
+    :param stdout: Captured standard output; ``bytes`` in binary mode, ``str`` in text mode.
+    :param stderr: Captured standard error; ``bytes`` in binary mode, ``str`` in text mode.
+    :param retcode: Process exit code as returned by :attr:`subprocess.Popen.returncode`.
     """
 
     stdout: bytes | str
@@ -70,8 +72,10 @@ class ProcData:
 
 
 def _fmt_proc_cmd(args: list[str]) -> list[str]:
-    """
-    Format command preamble.
+    """Format a colorized log-record arguments list announcing command execution.
+
+    :param args: The command tokens that are about to be executed.
+    :returns: A ``logger.debug``-ready positional-args list (format string + values).
     """
     return [
         "%s[executing]%s `%s`",
@@ -82,8 +86,14 @@ def _fmt_proc_cmd(args: list[str]) -> list[str]:
 
 
 def _fmt_proc_output(stream_class: ProcStreamClassifier, line: str) -> list[str]:
-    """
-    Format stdout/stderr logging output.
+    """Format a colorized log-record arguments list for a single line of subprocess output.
+
+    The color chosen depends on the stream: gray for combined output, blue for stdout,
+    yellow for stderr.
+
+    :param stream_class: Which stream the line originated from.
+    :param line: The decoded text line (trailing whitespace is stripped on render).
+    :returns: A ``logger.debug``-ready positional-args list (format string + values).
     """
     fore_color = ""
     match stream_class:
@@ -114,8 +124,13 @@ def _iterate_proc_output(stream: IO[str], stream_class: ProcStreamClassifier) ->
 
 
 def _iterate_proc_output(stream: IO[bytes] | IO[str], stream_class: ProcStreamClassifier) -> bytes | str:
-    """
-    Iterate over the process's stdout/stderr.
+    """Drain a synchronous subprocess stream, logging each line and accumulating the full output.
+
+    Mode (binary vs. text) is detected from the stream itself via a zero-length read.
+
+    :param stream: An open :class:`~typing.IO` stream attached to a subprocess pipe.
+    :param stream_class: Which stream is being drained; controls log colorization.
+    :returns: All accumulated output — ``bytes`` for binary streams, ``str`` for text streams.
     """
     accumulated_bytes: bytes = b""
     accumulated_str: str = ""
@@ -133,12 +148,13 @@ def _iterate_proc_output(stream: IO[bytes] | IO[str], stream_class: ProcStreamCl
 
 
 def _is_text_mode(kwargs: dict[str, Any]) -> bool:
-    """
-    True when Popen kwargs request text-mode streams.
+    """Return ``True`` when the given :class:`~subprocess.Popen` kwargs request text-mode streams.
 
-    Mirrors the conditions used by typeshed's Popen overloads: any of
-    ``text``, ``universal_newlines``, ``encoding``, or ``errors`` enables
-    text mode.
+    Mirrors the conditions used by typeshed's ``Popen`` overloads: any of
+    ``text``, ``universal_newlines``, ``encoding``, or ``errors`` enables text mode.
+
+    :param kwargs: The keyword-argument dict that will be forwarded to ``Popen``.
+    :returns: ``True`` if any text-mode keyword is present and truthy (or non-``None``).
     """
     return bool(
         kwargs.get("text")
@@ -149,8 +165,13 @@ def _is_text_mode(kwargs: dict[str, Any]) -> bool:
 
 
 def _display_proc_error(args: list[str], proc_data: ProcData) -> None:
-    """
-    Show command data in the case of error.
+    """Log the command, exit code, and captured output when a subprocess fails.
+
+    If the effective log level is ``DEBUG`` or lower the output was already logged
+    line-by-line during draining, so it is not repeated.
+
+    :param args: The command tokens that were executed.
+    :param proc_data: The collected output and exit status of the failed process.
     """
     logger.error(f"`{shlex.join(args)}` returned: {proc_data.retcode!r}")
     # If the log level is debug or lower, this info was already logged.
@@ -170,15 +191,21 @@ def exec_cmd(
     ignore_retcode: bool = False,
     **kwargs: Any,
 ) -> ProcData:
-    """
-    Run a command line and:
-    - Provide input
-    - Watch the output
-    - Integrate logging
-    - Format the results
+    """Run a subprocess synchronously, logging its output and returning captured results.
 
-    Except for `ignore_retcode`, the arguments are identical to `subprocess.Popen()` and are passed directly to that
-    constructor.
+    stdout and stderr are drained concurrently in a two-thread pool to prevent pipe-buffer
+    deadlock.  All parameters except ``ignore_retcode`` are forwarded to :class:`subprocess.Popen`.
+
+    :param args: Command and its arguments as a list of strings.
+    :param input: Optional bytes to write to the process's stdin before closing it.
+    :param stdout: stdout disposition; defaults to ``PIPE`` to capture output.
+        Pass ``None`` to inherit the parent's stdout, or ``DEVNULL`` to discard.
+    :param stderr: stderr disposition; defaults to ``PIPE`` to capture output.
+        Pass ``STDOUT`` to merge stderr into stdout, ``None`` to inherit, or ``DEVNULL`` to discard.
+    :param cwd: Working directory for the subprocess; ``None`` inherits the caller's cwd.
+    :param ignore_retcode: When ``True``, non-zero exit codes are not logged as errors.
+    :param kwargs: Additional keyword arguments forwarded verbatim to :class:`subprocess.Popen`.
+    :returns: A :class:`ProcData` containing captured stdout, stderr, and the exit code.
     """
     logger.debug(*_fmt_proc_cmd(args))
 
@@ -225,11 +252,16 @@ async def _async_iterate_proc_output(
     stream: asyncio.StreamReader,
     stream_class: ProcStreamClassifier,
 ) -> bytes:
-    """
-    Drain an async subprocess stream, logging each decoded line.
+    """Drain an async subprocess stream, logging each decoded line and accumulating output.
 
-    Reads in chunks rather than line-by-line to avoid the ``asyncio.StreamReader``
-    default 64 KiB per-line limit while still logging individual lines.
+    Reads in fixed-size chunks rather than line-by-line to avoid the
+    :class:`asyncio.StreamReader` default 64 KiB per-line buffer limit, which raises
+    :exc:`asyncio.LimitOverrunError` on binary data or output without newlines.
+    Each chunk is split on newlines for per-line logging before accumulation.
+
+    :param stream: The :class:`asyncio.StreamReader` attached to the subprocess pipe.
+    :param stream_class: Which stream is being drained; controls log colorization.
+    :returns: All accumulated output as raw bytes.
     """
     accumulated: bytes = b""
     while True:
@@ -251,13 +283,29 @@ async def async_exec_cmd(
     ignore_retcode: bool = False,
     **kwargs: Any,
 ) -> ProcData:
-    """
-    Async counterpart to `exec_cmd`.  Runs a subprocess without blocking the event loop.
+    """Run a subprocess asynchronously without blocking the event loop.
 
-    Signature and semantics match `exec_cmd` except that ``asyncio.create_subprocess_exec``
-    does not support text-mode streams.  Passing any of ``text``, ``universal_newlines``,
-    ``encoding``, or ``errors`` raises ``ValueError``.  ``ProcData.stdout`` and
-    ``ProcData.stderr`` are always ``bytes``; decode at the callsite if needed.
+    Signature and semantics match :func:`exec_cmd` with one restriction:
+    :func:`asyncio.create_subprocess_exec` does not support text-mode streams.
+    Passing ``text``, ``universal_newlines``, ``encoding``, or ``errors`` raises
+    :exc:`ValueError`.  :attr:`ProcData.stdout` and :attr:`ProcData.stderr` are always
+    ``bytes``; decode at the callsite if needed.
+
+    Both streams are drained concurrently via :func:`asyncio.gather` to prevent
+    pipe-buffer deadlock.
+
+    :param args: Command and its arguments as a list of strings.
+    :param input: Optional bytes to write to the process's stdin before closing it.
+    :param stdout: stdout disposition; defaults to ``PIPE`` to capture output.
+        Pass ``None`` to inherit the parent's stdout, or ``DEVNULL`` to discard.
+    :param stderr: stderr disposition; defaults to ``PIPE`` to capture output.
+        Pass ``STDOUT`` to merge stderr into stdout, ``None`` to inherit, or ``DEVNULL`` to discard.
+    :param cwd: Working directory for the subprocess; ``None`` inherits the caller's cwd.
+    :param ignore_retcode: When ``True``, non-zero exit codes are not logged as errors.
+    :param kwargs: Additional keyword arguments forwarded to :func:`asyncio.create_subprocess_exec`.
+    :returns: A :class:`ProcData` containing captured stdout, stderr, and the exit code.
+    :raises ValueError: If any text-mode keyword (``text``, ``encoding``, ``errors``,
+        ``universal_newlines``) is present in ``kwargs``.
     """
     if _is_text_mode(kwargs):
         raise ValueError(
@@ -316,15 +364,18 @@ async def async_exec_cmd(
 
 
 def get_answer(prompt: str, accept: list[str], lower: bool = True) -> bool:
-    """
-    Get an answer from the user.  If `lower` is `True`, convert confirmation option strings and user input to lowercase before
-    comparison.
+    """Prompt the user for input and return whether the response matches an accepted answer.
 
-    Example:
-    ```
-    if not xjfx.get_answer("Continue? [Y|n]", ["yes", "y", ""]):
-        exit()
-    ```
+    Example::
+
+        if not xjfx.get_answer("Continue? [Y|n]", ["yes", "y", ""]):
+            sys.exit()
+
+    :param prompt: The question text displayed to the user (a trailing space is appended).
+    :param accept: List of accepted answer strings that evaluate to ``True``.
+    :param lower: When ``True`` (default), both the user's input and ``accept`` values are
+        lowercased before comparison, making the match case-insensitive.
+    :returns: ``True`` if the user's input matches any entry in ``accept``, ``False`` otherwise.
     """
     answer = input(f"{prompt} ").lower()
     if any(answer.lower() == a.lower() if lower else answer == a for a in accept):
@@ -333,20 +384,40 @@ def get_answer(prompt: str, accept: list[str], lower: bool = True) -> bool:
 
 
 def get_yes(prompt: str) -> bool:
-    """
-    Get a yes/no answer.
+    """Prompt the user with a ``[Y|n]`` suffix and return ``True`` for affirmative responses.
+
+    Accepts ``"yes"``, ``"y"``, or an empty string (pressing Enter) as affirmative.
+    Delegates to :func:`get_answer` with a fixed ``accept`` list.
+
+    :param prompt: The question text displayed before the ``[Y|n]`` indicator.
+    :returns: ``True`` if the user answers affirmatively, ``False`` otherwise.
     """
     return get_answer(f"{prompt} [Y|n]", accept=["yes", "y", ""])
 
 
 def setup_logging(level: int = logging.INFO) -> None:
-    """
-    Default to colorized logging using `colorama` and predefined colorized format specs.
+    """Configure the root logger with colorized output using :mod:`colorama`.
+
+    Installs a custom :class:`logging.LogRecord` factory that adds ANSI color codes to
+    the level name, logger name, and message.  Falls back silently if the root logger
+    already has handlers (standard :func:`logging.basicConfig` behavior).
+
+    :param level: Minimum log level to emit; defaults to :data:`logging.INFO`.
     """
 
     class ColorLogRecord(logging.LogRecord):
-        """
-        Add colors to logging output
+        """A :class:`logging.LogRecord` subclass that injects ANSI color codes into each record.
+
+        Three extra attributes are set in :meth:`__init__` and referenced by the format string:
+
+        * ``colorname``  — bracketed logger name with bright-green color.
+        * ``colorlevel`` — bracketed level name with level-specific color.
+        * ``colormsg``   — formatted message with level-specific foreground color.
+
+        :cvar lvl_colors: Mapping from level name to the ANSI color used for the level badge.
+        :cvar msg_colors: Mapping from level name to the ANSI color used for the message body.
+        :cvar name_color: ANSI color applied to the logger-name badge.
+        :cvar reset: ANSI reset sequence appended after every colored segment.
         """
 
         lvl_colors: dict[str, str] = {
@@ -380,6 +451,18 @@ def setup_logging(level: int = logging.INFO) -> None:
             func: str | None = None,
             sinfo: str | None = None,
         ) -> None:
+            """Initialise the record and compute the three colorized attribute strings.
+
+            :param name: Logger name.
+            :param level: Numeric log level.
+            :param pathname: Full path of the source file that issued the log call.
+            :param lineno: Line number within ``pathname``.
+            :param msg: The log message object.
+            :param args: Format arguments for ``msg``, or ``None``.
+            :param exc_info: Exception tuple or ``None``; passed through to the base class.
+            :param func: Name of the function that issued the log call.
+            :param sinfo: Stack-info string or ``None``.
+            """
             super().__init__(name, level, pathname, lineno, msg, args, exc_info, func, sinfo)
             self.colorname = f"{self.name_color}[{self.name:17}]{self.reset}"
             self.colorlevel = f"{self.lvl_colors[self.levelname]}[{self.levelname:8}]{self.reset}"
@@ -390,13 +473,12 @@ def setup_logging(level: int = logging.INFO) -> None:
 
 
 class GrouperIncomplete(enum.Enum):
-    """
-    Enumerate options for handling incomplete groupings.
+    """Enumerate strategies for handling a partial final chunk in :func:`grouper`.
 
-    fill: Add elements to last block if it is partial
-    strict: Raise `ValueError` if last block is partial
-    ignore: Discard elements from partial last block
-    remainder: Keep partial last block
+    :cvar FILL: Pad the last chunk to length ``n`` using ``fillvalue``.
+    :cvar STRICT: Raise :exc:`ValueError` if the iterable length is not a multiple of ``n``.
+    :cvar IGNORE: Silently discard elements that do not fill the last chunk.
+    :cvar REMAINDER: Keep the partial last chunk as a shorter tuple.
     """
 
     FILL = enum.auto()
@@ -411,16 +493,27 @@ def grouper(
     incomplete: GrouperIncomplete = GrouperIncomplete.FILL,
     fillvalue: object = None,
 ) -> Iterator[tuple[object, ...]]:
-    """
-    Collect data into non-overlapping chunks or blocks.  (Why is this functionality not part of the official `itertools` API?)
+    """Partition a sequence into non-overlapping chunks of length ``n``.
 
-    See [`grouper()` example](https://docs.python.org/3/library/itertools.html#itertools-recipes).
-    ```
-    FILL:      grouper('ABCDEFG', 3, fillvalue='x')                          --> ABC DEF Gxx
-    STRICT:    grouper('ABCDEFG', 3, incomplete=GrouperIncomplete.STRICT)    --> ABC DEF ValueError
-    IGNORE:    grouper('ABCDEFG', 3, incomplete=GrouperIncomplete.IGNORE)    --> ABC DEF
-    REMAINDER: grouper('ABCDEFG', 3, incomplete=GrouperIncomplete.REMAINDER) --> ABC DEF G
-    ```
+    Behavior for a partial final chunk is controlled by ``incomplete``::
+
+        FILL:      grouper('ABCDEFG', 3, fillvalue='x')                       --> ABC DEF Gxx
+        STRICT:    grouper('ABCDEFG', 3, incomplete=GrouperIncomplete.STRICT) --> ABC DEF ValueError
+        IGNORE:    grouper('ABCDEFG', 3, incomplete=GrouperIncomplete.IGNORE) --> ABC DEF
+        REMAINDER: grouper('ABCDEFG', 3, incomplete=GrouperIncomplete.REMAINDER) --> ABC DEF G
+
+    See the itertools grouper recipe:
+    https://docs.python.org/3/library/itertools.html#itertools-recipes
+
+    :param i: The input sequence to partition.
+    :param n: Chunk size; must be a positive integer.
+    :param incomplete: Strategy for the partial last chunk; defaults to
+        :attr:`GrouperIncomplete.FILL`.
+    :param fillvalue: Padding value used when ``incomplete`` is
+        :attr:`GrouperIncomplete.FILL`; defaults to ``None``.
+    :returns: An iterator of ``n``-tuples (or shorter for ``REMAINDER``).
+    :raises ValueError: When ``incomplete`` is :attr:`GrouperIncomplete.STRICT` and
+        the sequence length is not a multiple of ``n``.
     """
     args = [iter(i)] * n
     match incomplete:
@@ -437,8 +530,16 @@ def grouper(
 
 
 def thr_exec(func: Callable[..., object], args: list[tuple[object, ...]], max_workers: int | None = None) -> None:
-    """
-    Special case reduction for executing a set of parallel tasks in a thread pool.
+    """Execute a set of homogeneous tasks in parallel using a thread pool.
+
+    Each element of ``args`` is unpacked as positional arguments to ``func``.  Exceptions
+    raised by individual tasks are caught, logged as errors, and swallowed — callers cannot
+    detect per-task failures.
+
+    :param func: The callable to invoke for each task.
+    :param args: List of argument tuples; one thread-pool submission per element.
+    :param max_workers: Maximum number of worker threads; ``None`` lets
+        :class:`~concurrent.futures.ThreadPoolExecutor` choose based on the CPU count.
     """
     with ThreadPoolExecutor(max_workers=max_workers) as pool_exec:
         futures: dict[Future[object], tuple[object, ...]] = {pool_exec.submit(func, *al): al for al in args}
